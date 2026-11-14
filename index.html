@@ -86,6 +86,14 @@ label.inline { display: flex; gap: 6px; align-items: center; color: var(--muted)
 .ft8row.cq > span:last-child { color: var(--ok); font-weight: 600; }
 .ft8row.slot { border-top: 1px solid var(--line); margin-top: 2px; }
 .ft8row.head { color: var(--muted); }
+.wsprrow { display: grid; grid-template-columns: 3.4em 2.6em 3.2em 6.3em 2.4em minmax(0, 1fr) 3.6em 2.6em 4.2em; gap: 0 6px; padding: 2px 0; }
+.wsprrow.slot { border-top: 1px solid var(--line); margin-top: 2px; }
+#v-wspr .ft8list { max-height: none; flex: 1; min-height: 200px; }
+#wsprwf { cursor: crosshair; touch-action: pan-y; }
+#wsprwf, #wsprwfo { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+#wsprwfo { pointer-events: none; }
+#wspren.active { background: #c62828; border-color: #c62828; color: #fff; }
+@media (max-width: 520px) { .wsprrow { grid-template-columns: 3.2em 2.4em 5.8em minmax(0, 1fr) 3.3em 2.3em 4.6em; } .wsprrow .w-dt, .wsprrow .w-dr { display: none; } }
 .ft8row { cursor: pointer; border-radius: 4px; }
 .ft8row:hover { background: color-mix(in srgb, var(--line) 50%, transparent); }
 .ft8row.me > span:last-child { color: var(--warn); font-weight: 700; }
@@ -190,6 +198,7 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
     <div class="tabs seg" role="tablist" aria-label="View">
       <button role="tab" data-tab="spec" aria-selected="true">Spectrum</button>
       <button role="tab" data-tab="ft8" aria-selected="false">FT8</button>
+      <button role="tab" data-tab="wspr" aria-selected="false">WSPR</button>
     </div>
     <div id="v-spec" class="tabview">
     <div class="canvases">
@@ -210,6 +219,23 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
         <select id="wftick" aria-label="Time marks"><option value="10">marks 10 s</option><option value="15">marks 15 s (FT8)</option><option value="0">no marks</option></select></span>
       <label class="inline"><input id="hidelo" type="checkbox" checked> interpolate the f_LO bin</label>
     </div>
+    </div>
+    <div id="v-wspr" class="tabview" hidden>
+      <div class="ft8wfbox">
+        <canvas id="wsprwf"></canvas>
+        <canvas id="wsprwfo"></canvas>
+        <div id="wsprro" class="readout"></div>
+      </div>
+      <p class="note" style="margin:0">WSPR band: audio 1400 – 1600 Hz at the WSPR dial frequency. Tap / click to set the TX frequency (red).</p>
+      <div class="row"><button id="wsprdial" title="Tune to the WSPR dial frequency of this band (USB)">WSPR frequency</button><button id="wspron">Decode WSPR</button><button id="wsprclear">Clear</button></div>
+      <p class="note" id="wsprst">Decodes every 2-minute period (from the even minute) of the board's receive audio. Clock within about ±1 s.</p>
+      <div class="field">
+        <span>TX audio</span><div class="row"><input id="wsprtxf" type="number" min="1410" max="1590" step="1" value="1500" aria-label="WSPR TX audio frequency in Hz" style="width:7em"><span class="unit">Hz</span></div>
+        <span>TX share</span><select id="wsprpct" aria-label="Share of periods with TX"><option value="10">10 %</option><option value="20" selected>20 %</option><option value="33">33 %</option><option value="50">50 %</option></select>
+      </div>
+      <div class="row"><button id="wspren" title="Master switch: transmissions only while this is on">Enable TX</button><button id="wsprhalt">Halt</button></div>
+      <p class="note" id="wsprtxmsg">Sends your call, the first 4 grid characters and the power from the TX power slider (call and grid: FT8 tab / station data).</p>
+      <div class="ft8list" id="wsprlist" role="log" aria-label="WSPR spots"></div>
     </div>
     <div id="v-ft8" class="tabview" hidden>
       <div class="ft8wfbox">
@@ -280,13 +306,17 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
   <button id="mptt" class="ptt" aria-pressed="false">PTT</button>
 </div>
 <script src="ft8.js"></script>
+<script src="wspr.js"></script>
 <script>
 'use strict';
 // ---------------------------------------------------------------- protocol (docs/usb-protocol.md)
 // view tab ('spec' or 'ft8') and the FT8 audio waterfall state
+// WSPR state (section "WSPR")
+const WS = { on: false, worker: null, busy: false, lastPeriod: 0, en: false, txPeriod: 0, txing: false, ka: 0, end: 0, buf: new Float32Array(16384), n: 0, lo: -100, spots: [] };
 const V = { tab: 'spec', buf: new Float32Array(4096), n: 0, lo: -100, hi: -60, lastSlot: 0 };
 // FT8 decoder state (section "FT8 decoding"); here because the waterfall overlay reads F.marks
-const F = { on: false, worker: null, ring: new Float32Array(12000 * 32), next: -1, offs: null, offsAt: 0, lastSlot: 0,
+const F = { on: false, worker: null, ring: new Float32Array(12000 * 130),   // 130 s: also a WSPR period
+            next: -1, offs: null, offsAt: 0, lastSlot: 0,
             busy: false, marks: [], rows: 0 };
 const T_CMD = 0x01, T_AUDIO_TX = 0x02, T_TEXT = 0x81, T_SPECTRUM = 0x82, T_STATUS = 0x83, T_AUDIO = 0x84;
 const VID = 0x1209, PID = 0x0001;
@@ -501,7 +531,8 @@ function startDemo() {
       const n = Math.min(192, due - A12.idx), pl = new Uint8Array(8 + 2 * n), v = new DataView(pl.buffer);
       v.setUint32(0, A12.idx >>> 0, true); v.setUint16(4, n, true); v.setUint16(6, due - A12.idx - n, true);
       for (let i = 0; i < n; i++, A12.idx++) {
-        const x = st.mode ? demoFt8(A12.w0 + A12.idx / (12000 * (1 + 300e-6))) + 0.01 * (rand() + rand() + rand() - 1.5) : 0;
+        const tw = A12.w0 + A12.idx / (12000 * (1 + 300e-6));
+        const x = st.mode ? demoFt8(tw) + demoWspr(tw) + 0.01 * (rand() + rand() + rand() - 1.5) : 0;
         v.setInt16(8 + 2 * i, Math.round(Math.max(-1, Math.min(1, x)) * 32767), true);
       }
       parser.push(encodeFrame(T_AUDIO, pl));
@@ -525,6 +556,21 @@ function startDemo() {
     }
     const i = Math.floor((t - slot) * 12000);
     return i >= 0 && i < 180000 ? st.ft8.buf[i] : 0;
+  }
+  // two WSPR stations per 2-minute period (the demo does not know the dial: they are always there)
+  function demoWspr(t) {
+    const per = Math.floor(t / 120) * 120;
+    if (!st.wspr || st.wspr.per !== per) {
+      const buf = new Float32Array(120 * 12000);
+      if (typeof WSPR !== 'undefined')
+        [['DL1ABC', 'JO62', 23, 1452, -18], ['G4XYZ', 'IO91', 37, 1531, -24]].forEach(([c, g, p, f, snr]) => {
+          const w = WSPR.synth(WSPR.encode(c, g, p).symbols, f, Math.sqrt(2 * 1e-4 / 3 * 2500 / 6000 * Math.pow(10, snr / 10)));
+          for (let i = 0; i < w.length && 12000 + i < buf.length; i++) buf[12000 + i] += w[i];
+        });
+      st.wspr = { per, buf };
+    }
+    const i = Math.floor((t - per) * 12000);
+    return i >= 0 && i < st.wspr.buf.length ? st.wspr.buf[i] : 0;
   }
   function handle(line) {
     const a = line.trim().split(/\s+/);
@@ -911,12 +957,13 @@ registerProcessor('qrpico-rx', QrpicoRx);
 function rxAudioFrame(p) {
   const v = new DataView(p.buffer, p.byteOffset, p.byteLength), n = v.getUint16(4, true), first = v.getUint32(0, true);
   const s = new Int16Array(p.buffer.slice(p.byteOffset + 8, p.byteOffset + 8 + 2 * n));   // little endian like the board
-  if (F.on) ft8Collect(first, s);
+  if (F.on || WS.on) ft8Collect(first, s);
   if (V.tab === 'ft8') ft8WfFeed(s);
+  else if (V.tab === 'wspr') wsprWfFeed(s);
   if (A.node) A.node.port.postMessage({ first, s }, [s.buffer]);
 }
 // the WebUSB audio stream runs while the player or the FT8 decoder needs it
-function audioStream() { if (link) cmd(`stream audio ${A.node || F.on || V.tab === 'ft8' ? 'on' : 'off'}`, true); }
+function audioStream() { if (link) cmd(`stream audio ${A.node || F.on || WS.on || V.tab === 'ft8' || V.tab === 'wspr' ? 'on' : 'off'}`, true); }
 // Device names appear only while the page holds the microphone permission. With a one-time grant
 // (and on file:// pages) it can end when the last stream stops, so the list is taken while the
 // permission stream is still open, and the last list with names is kept (A.devs).
@@ -1237,9 +1284,9 @@ setInterval(ft8TxTick, 100);
 function setTab(tab) {
   V.tab = tab; store.set('tab', tab);
   document.querySelectorAll('[data-tab]').forEach(b => b.setAttribute('aria-selected', String(b.dataset.tab === tab)));
-  $('v-spec').hidden = tab !== 'spec'; $('v-ft8').hidden = tab !== 'ft8';
+  $('v-spec').hidden = tab !== 'spec'; $('v-ft8').hidden = tab !== 'ft8'; $('v-wspr').hidden = tab !== 'wspr';
   audioStream();
-  if (tab === 'spec') { S.fLoWf = null; drawSpectrum(); drawWfOverlay(); } else ft8WfOverlay();
+  if (tab === 'spec') { S.fLoWf = null; drawSpectrum(); drawWfOverlay(); } else if (tab === 'ft8') ft8WfOverlay(); else wsprWfOverlay();
 }
 document.querySelectorAll('[data-tab]').forEach(b => b.addEventListener('click', () => setTab(b.dataset.tab)));
 
@@ -1319,6 +1366,194 @@ function ft8WfOverlay() {
   c.addEventListener('mouseleave', () => { $('ft8ro').textContent = ''; });
   $('ft8txf').addEventListener('input', ft8WfOverlay);
   window.addEventListener('resize', ft8WfOverlay);
+})();
+// ---------------------------------------------------------------- WSPR (wspr.js; decoding in wsprworker.js)
+// Periods start at even UTC minutes; the transmission runs 1 ... 111.6 s, decoded at 114 s. Audio from
+// the same timed ring as FT8 (F.ring, 130 s). TX: in a random share of the periods (never twice in a
+// row), 'wspr load' + PTT 0.9 s after the minute; the board ends TX after 110.6 s.
+const WSPR_DIAL = { 1: 28124600, 2: 14095600, 3: 7038600 };   // band -> USB dial frequency
+const WSPR_DBM = [0, 3, 7, 10, 13, 17, 20, 23, 27, 30, 33, 37, 40, 43, 47, 50, 53, 57, 60];
+const hm = t => new Date(t * 1000).toISOString().slice(11, 16).replace(':', '');
+function gridLL(g) {                            // centre of a 4-character locator: [lat, lon] in degrees
+  if (!/^[A-R]{2}[0-9]{2}/i.test(g || '')) return null;
+  g = g.toUpperCase();
+  return [(g.charCodeAt(1) - 65) * 10 - 90 + Number(g[3]) + 0.5, (g.charCodeAt(0) - 65) * 20 - 180 + Number(g[2]) * 2 + 1];
+}
+function km(a, b) {
+  const r = Math.PI / 180, x = Math.sin((b[0] - a[0]) * r / 2) ** 2 + Math.cos(a[0] * r) * Math.cos(b[0] * r) * Math.sin((b[1] - a[1]) * r / 2) ** 2;
+  return Math.round(2 * 6371 * Math.asin(Math.sqrt(x)));
+}
+// TX power in dBm from the slider (board 1: about 5.4 W x level^2, the USB cap applied), to WSPR's 0 / 3 / 7 steps
+function wsprDbm() {
+  const l = Math.min(Number($('txpwr').value), (S.status && S.status.levelCap) || 1);
+  const dbm = 10 * Math.log10(5.4 * l * l * 1000);
+  return WSPR_DBM.reduce((a, b) => Math.abs(b - dbm) < Math.abs(a - dbm) ? b : a);
+}
+function wsprTick() {
+  const now = Date.now() / 1000, period = Math.floor(now / 120) * 120, into = now - period;
+  // decode the period that just ended its transmission window
+  if (WS.on && F.offs !== null && !WS.busy && into >= 114 && period !== WS.lastPeriod) {
+    WS.lastPeriod = period;
+    if (WS.txPeriod === period) { $('wsprst').textContent = `period ${hm(period)}: own transmission`; }
+    else {
+      const i0 = Math.round((period - F.offs) * 12000), N = F.ring.length, n = 114 * 12000, audio = new Float32Array(n);
+      let have = 0;
+      for (let i = 0; i < n; i++) { const k = i0 + i; if (k < F.next - N + 1 || k >= F.next || k < 0) continue; audio[i] = F.ring[k % N]; have++; }
+      if (have < 100 * 12000) $('wsprst').textContent = `period ${hm(period)}: only ${(have / 12000).toFixed(0)} s of audio, not decoded`;
+      else {
+        if (!WS.worker) {
+          WS.worker = new Worker('wsprworker.js');
+          WS.worker.onmessage = e => wsprResult(e.data);
+          WS.worker.onerror = e => { WS.busy = false; log('WSPR worker: ' + e.message); };
+        }
+        WS.busy = true;
+        $('wsprst').textContent = `period ${hm(period)}: decoding ...`;
+        WS.worker.postMessage({ period, audio }, [audio.buffer]);
+      }
+    }
+  }
+  wsprTxTick(now, period, into);
+}
+function wsprResult(r) {
+  WS.busy = false;
+  const usb = (S.status ? S.status.mode : modeNames.indexOf(S.mode)) !== 2, dial = S.wanted, me = gridLL($('ft8grid').value);
+  $('wsprst').textContent = `period ${hm(r.period)}: ${r.spots.length} spot${r.spots.length === 1 ? '' : 's'}, ${(r.ms / 1000).toFixed(1)} s` +
+    (Object.values(WSPR_DIAL).includes(dial) ? '' : ' - not on a WSPR dial frequency');
+  const list = $('wsprlist'), frag = document.createDocumentFragment();
+  r.spots.forEach((d, i) => {
+    const row = document.createElement('div'), ll = gridLL(d.grid);
+    row.className = 'wsprrow' + (i === 0 ? ' slot' : '');
+    const mhz = ((dial + (usb ? 1 : -1) * d.freq) / 1e6).toFixed(6);
+    [[hm(r.period)], [String(d.snr)], [d.dt.toFixed(1), 'w-dt'], [mhz], [String(d.drift), 'w-dr'], [d.call], [d.grid], [String(d.dbm)], [me && ll ? km(me, ll) + ' km' : '']]
+      .forEach(([t, cls]) => { const c = document.createElement('span'); c.textContent = t; if (cls) c.className = cls; row.appendChild(c); });
+    frag.appendChild(row);
+  });
+  const atTop = list.scrollTop < 8;
+  list.insertBefore(frag, list.firstChild);
+  while (list.children.length > 400) list.removeChild(list.lastChild);
+  if (atTop) list.scrollTop = 0;
+  WS.spots = r.spots;
+  wsprWfOverlay();
+}
+// TX scheduling: decided at each even minute; a period after an own TX period is never chosen
+function wsprTxTick(now, period, into) {
+  if (WS.txing) {
+    if (!S.status || now > WS.end || (S.status.txState === 0 && now - WS.txPeriod > 3)) wsprTxEnd();
+    return;
+  }
+  if (!WS.en || !link || into < 0.9 || into > 3 || WS.decided === period) return;
+  WS.decided = period;
+  if (WS.txPeriod === period - 120 || TXA.ptt || Q.txing) return;
+  if (Math.random() * 100 >= Number($('wsprpct').value)) return;
+  const call = $('ft8call').value.trim().toUpperCase(), grid = $('ft8grid').value.trim().slice(0, 4).toUpperCase(), dbm = wsprDbm();
+  const e = WSPR.encode(call, grid, dbm);
+  if (!e) { log(`WSPR: cannot encode "${call} ${grid} ${dbm}" (standard call and 4-character grid needed)`); WS.en = false; wsprShow(); return; }
+  const f = Math.max(1410, Math.min(1590, Number($('wsprtxf').value) || 1500)) - 1.5 * WSPR.TONE_HZ;   // the field is the signal centre
+  WS.txPeriod = period; WS.txing = true; WS.end = period + 114; WS.msg = `${call} ${grid} ${dbm}`;
+  cmd(`wspr load ${f.toFixed(2)} ${Array.from(e.symbols).join('')}`, true);
+  cmd('ptt on');
+  WS.ka = setInterval(() => cmd('ptt ka', true), 250);
+  wsprShow();
+}
+function wsprTxEnd() {
+  clearInterval(WS.ka); WS.ka = 0;
+  if (S.status && S.status.txState) cmd('ptt off', true);
+  WS.txing = false; wsprShow();
+}
+function wsprShow() {
+  $('wspren').classList.toggle('active', WS.en); $('wspren').textContent = WS.en ? 'TX enabled' : 'Enable TX';
+  const el = $('wsprtxmsg');
+  el.classList.toggle('tx', WS.txing);
+  if (WS.txing) el.textContent = `TX now: ${WS.msg} (until ${hm(WS.txPeriod + 120)})`;
+  else if (WS.en) el.textContent = `TX enabled: ${$('ft8call').value.trim().toUpperCase()} ${$('ft8grid').value.trim().slice(0, 4).toUpperCase()} ${wsprDbm()} dBm in about ${$('wsprpct').value} % of the periods`;
+}
+function wsprSet(on) {
+  WS.on = on; store.set('wspr', on);
+  $('wspron').textContent = on ? 'Stop WSPR' : 'Decode WSPR'; $('wspron').classList.toggle('active', on);
+  if (on && F.offs === null) { F.next = -1; }
+  audioStream();
+}
+// ---- WSPR waterfall: 1400 ... 1600 Hz, 16384-point FFT (0.73 Hz) every 8192 samples (0.68 s)
+const WSPR_F0 = 1400, WSPR_F1 = 1600, wsprX = (f, W) => (f - WSPR_F0) / (WSPR_F1 - WSPR_F0) * W;
+const wsprWin = Float32Array.from({ length: 16384 }, (_, i) => 0.5 - 0.5 * Math.cos(2 * Math.PI * (i + 0.5) / 16384));
+function wsprWfFeed(s) {
+  for (let i = 0; i < s.length; i++) {
+    WS.buf[WS.n++] = s[i] / 32768;
+    if (WS.n === 16384) { wsprWfRow(); WS.buf.copyWithin(0, 8192); WS.n = 8192; }
+  }
+}
+function wsprWfRow() {
+  const re = new Float64Array(16384), im = new Float64Array(16384);
+  for (let i = 0; i < 16384; i++) re[i] = WS.buf[i] * wsprWin[i];
+  FT8.fft(re, im);
+  const df = 12000 / 16384, k0 = Math.floor(WSPR_F0 / df), k1 = Math.ceil(WSPR_F1 / df), nb = k1 - k0, row = new Float32Array(nb);
+  for (let k = 0; k < nb; k++) row[k] = 10 * Math.log10(re[k0 + k] ** 2 + im[k0 + k] ** 2 + 1e-12);
+  const med = Float32Array.from(row).sort()[nb >> 1];
+  WS.lo += 0.1 * ((med - 3) - WS.lo);
+  const hi = WS.lo + 30;
+  const c = $('wsprwf'), resized = fit(c), g = c.getContext('2d'), W = c.width, H = c.height, dpr = window.devicePixelRatio || 1;
+  if (!W || !H) return;
+  if (resized) { g.fillStyle = css('--spec-bg'); g.fillRect(0, 0, W, H); wsprWfOverlay(); }
+  const rowH = Math.max(1, Math.round(2 * dpr));
+  g.drawImage(c, 0, 0, W, H - rowH, 0, rowH, W, H - rowH);
+  const img = g.createImageData(W, rowH);
+  for (let x = 0; x < W; x++) {
+    const k = Math.min(nb - 1, Math.floor(x / W * nb)), v = Math.max(0, Math.min(255, Math.round((row[k] - WS.lo) / (hi - WS.lo) * 255)));
+    for (let r = 0; r < rowH; r++) { const o = 4 * (r * W + x); img.data[o] = lut[3 * v]; img.data[o + 1] = lut[3 * v + 1]; img.data[o + 2] = lut[3 * v + 2]; img.data[o + 3] = 255; }
+  }
+  g.putImageData(img, 0, 0);
+  const per = Math.floor(Date.now() / 120000);
+  if (per !== WS.wfPer) {
+    WS.wfPer = per;
+    g.fillStyle = 'rgba(230,236,245,0.55)'; g.fillRect(0, 0, W, Math.max(1, Math.round(dpr)));
+    g.font = `${10 * dpr}px ui-monospace, monospace`; g.textBaseline = 'top'; g.fillStyle = 'rgba(230,236,245,0.85)';
+    g.fillText(new Date(per * 120000).toISOString().slice(11, 16), 4 * dpr, 2 * dpr);
+  }
+}
+function wsprWfOverlay() {
+  const c = $('wsprwfo'); fit(c);
+  const g = c.getContext('2d'), W = c.width, H = c.height, dpr = window.devicePixelRatio || 1;
+  if (!W || !H) return;
+  g.clearRect(0, 0, W, H);
+  g.font = `${10 * dpr}px ui-monospace, monospace`; g.textBaseline = 'bottom'; g.fillStyle = 'rgba(230,236,245,0.8)';
+  for (let f = 1420; f < WSPR_F1; f += 20) { const x = wsprX(f, W); g.fillRect(x, H - 6 * dpr, dpr, 6 * dpr); if (f % 40 === 0) g.fillText(String(f), x + 2 * dpr, H - dpr); }
+  const tx = Number($('wsprtxf').value) || 1500, x0 = wsprX(tx - 3, W), x1 = wsprX(tx + 3, W);
+  g.fillStyle = 'rgba(255,80,80,0.25)'; g.fillRect(x0, 0, Math.max(2, x1 - x0), H);
+  g.font = `${11 * dpr}px ui-monospace, monospace`; g.textBaseline = 'top';
+  const free = [0, 0, 0];
+  for (const m of (WS.spots || []).slice().sort((a, b) => a.freq - b.freq)) {
+    const x = wsprX(m.freq, W), tw = g.measureText(m.call).width + 4 * dpr, r = free.findIndex(f => x >= f);
+    if (r < 0) continue;
+    const y = (14 + r * 14) * dpr; free[r] = x + tw + 2 * dpr;
+    g.fillStyle = 'rgba(0,0,0,0.6)'; g.fillRect(x - dpr, y - dpr, tw, 13 * dpr);
+    g.fillStyle = '#7ee787'; g.fillText(m.call, x + dpr, y);
+  }
+}
+(() => {
+  const c = $('wsprwf');
+  c.addEventListener('click', e => {
+    const r = c.getBoundingClientRect(), f = Math.round(Math.max(1410, Math.min(1590, WSPR_F0 + (e.clientX - r.left) / r.width * (WSPR_F1 - WSPR_F0))));
+    $('wsprtxf').value = String(f); store.set('wsprtxf', f); wsprWfOverlay();
+  });
+  c.addEventListener('mousemove', e => { const r = c.getBoundingClientRect(); $('wsprro').textContent = `${(WSPR_F0 + (e.clientX - r.left) / r.width * 200).toFixed(1)} Hz`; });
+  c.addEventListener('mouseleave', () => { $('wsprro').textContent = ''; });
+  $('wsprtxf').addEventListener('change', () => { store.set('wsprtxf', $('wsprtxf').value); wsprWfOverlay(); });
+  $('wsprpct').addEventListener('change', () => { store.set('wsprpct', $('wsprpct').value); wsprShow(); });
+  $('wspron').addEventListener('click', () => wsprSet(!WS.on));
+  $('wsprclear').addEventListener('click', () => { $('wsprlist').textContent = ''; WS.spots = []; wsprWfOverlay(); });
+  $('wsprdial').addEventListener('click', () => {
+    const b = (S.status && S.status.band) || 2;
+    tune(WSPR_DIAL[b] || WSPR_DIAL[2]); setMode('usb');
+  });
+  $('wspren').addEventListener('click', () => {
+    if (!WS.en && !FT8.stdCall6($('ft8call').value.trim().toUpperCase())) { log('WSPR: enter your call sign (FT8 tab / station data)'); return; }
+    WS.en = !WS.en; if (!WS.en && WS.txing) { cmd('ptt off'); wsprTxEnd(); } wsprShow();
+  });
+  $('wsprhalt').addEventListener('click', () => { WS.en = false; if (WS.txing) { cmd('ptt off'); wsprTxEnd(); } wsprShow(); });
+  $('wsprtxf').value = store.get('wsprtxf', '1500'); $('wsprpct').value = store.get('wsprpct', '20');
+  window.addEventListener('resize', wsprWfOverlay);
+  if (store.get('wspr', false)) wsprSet(true);
+  setInterval(wsprTick, 250);
 })();
 setTab(store.get('tab', 'spec'));
 // a new Enable starts the tries afresh (after "no answer, TX stopped" the same message can be sent again)
@@ -1697,7 +1932,7 @@ $('txpwr').addEventListener('input', () => {
 function afterConnect() {
   if (link) {
     cmd('station', true);                // station data from the board's flash (fills call, grid, power, TX Hz)
-    if (A.node || F.on || V.tab === 'ft8') cmd('stream audio on', true);
+    if (A.node || F.on || WS.on || V.tab === 'ft8' || V.tab === 'wspr') cmd('stream audio on', true);
     if (!A.ctx && store.get('listening', false)) listen();
     if (TXA.node) cmd('stream txaudio on', true);
   }
