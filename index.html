@@ -636,6 +636,9 @@ function onFrame(type, flags, p) {
     if (/^ptt on: /.test(t) && !/^ptt on: ok/.test(t) && TXA.ptt) setPtt(false, true);   // refused by the board
     const st = t.match(/^station: call (\S+) grid (\S+) power ([\d.]+) ft8hz (\d+)(?: xtal ([+-]?[\d.]+))?/m);
     if (st) stationApply(st[1], st[2], Number(st[3]), Number(st[4]), st[5]);
+    // the host's SOF reference of the crystal calibration: kept per device (each host has its own USB clock)
+    const xr = t.match(/^xtal ref: ([+-][\d.]+) ppm/m);
+    if (xr) store.set('xtalref', Number(xr[1]));
   }
   else if (type === T_SPECTRUM) { S.spec = parseSpectrum(p); if (!S.status) S.wanted = S.spec.wanted; drawSpectrum(); pushWaterfall(); }
   else if (type === T_STATUS) { S.status = parseStatus(p); updateStatus(); txRate(); }
@@ -1932,6 +1935,8 @@ $('txpwr').addEventListener('input', () => {
 function afterConnect() {
   if (link) {
     cmd('station', true);                // station data from the board's flash (fills call, grid, power, TX Hz)
+    const xr = store.get('xtalref', null);   // this device's SOF reference: RX / TX follow the crystal live
+    if (xr !== null) cmd(`xtal ref ${xr >= 0 ? '+' : ''}${Number(xr).toFixed(3)}`, true);
     if (A.node || F.on || WS.on || V.tab === 'ft8' || V.tab === 'wspr') cmd('stream audio on', true);
     if (!A.ctx && store.get('listening', false)) listen();
     if (TXA.node) cmd('stream txaudio on', true);
