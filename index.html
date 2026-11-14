@@ -224,6 +224,7 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
         <span>my call</span><input id="ft8call" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="e.g. OE3XYZ" aria-label="My call sign">
         <span>my grid</span><input id="ft8grid" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="e.g. JN88ee" maxlength="6" aria-label="My locator, 4 or 6 characters">
         <span>TX audio</span><div class="row"><input id="ft8txf" type="number" min="200" max="2900" step="1" value="1500" aria-label="TX audio frequency in Hz" style="width:7em"><span class="unit">Hz</span></div>
+        <span title="Error of the board's 25 MHz crystal (+ = fast), e.g. from the median of your PSKReporter spots: (reported - sent) / sent">crystal</span><div class="row"><input id="xtal" type="number" min="-200" max="200" step="0.01" value="0" aria-label="Crystal error in ppm" style="width:7em"><span class="unit">ppm</span></div>
       </div>
       <div class="row" style="margin-top:6px"><button id="ft8en" title="Master switch: transmissions only while this is on">Enable TX</button><button id="ft8cq">CQ</button><button id="ft8halt">Halt</button></div>
       <p class="note" id="ft8txmsg">Tap / click a decode to answer that station; the QSO then runs by itself (report, RR73, 73).</p>
@@ -587,8 +588,8 @@ function onFrame(type, flags, p) {
   if (type === T_TEXT) {
     const t = dec.decode(p); log(t);
     if (/^ptt on: /.test(t) && !/^ptt on: ok/.test(t) && TXA.ptt) setPtt(false, true);   // refused by the board
-    const st = t.match(/^station: call (\S+) grid (\S+) power ([\d.]+) ft8hz (\d+)/m);
-    if (st) stationApply(st[1], st[2], Number(st[3]), Number(st[4]));
+    const st = t.match(/^station: call (\S+) grid (\S+) power ([\d.]+) ft8hz (\d+)(?: xtal ([+-]?[\d.]+))?/m);
+    if (st) stationApply(st[1], st[2], Number(st[3]), Number(st[4]), st[5]);
   }
   else if (type === T_SPECTRUM) { S.spec = parseSpectrum(p); if (!S.status) S.wanted = S.spec.wanted; drawSpectrum(); pushWaterfall(); }
   else if (type === T_STATUS) { S.status = parseStatus(p); updateStatus(); txRate(); }
@@ -1127,8 +1128,9 @@ function ft8Settings() {
   store.set('ft8call', Q.my); store.set('ft8grid', $('ft8grid').value.trim()); store.set('ft8txf', $('ft8txf').value);
 }
 // station data live in the board's flash (console 'station'): read on connect, written on change
-function stationApply(call, grid, power, ft8hz) {
-  S.station = { call, grid, power, ft8hz };
+function stationApply(call, grid, power, ft8hz, xtal) {
+  S.station = { call, grid, power, ft8hz, xtal };
+  if (xtal !== undefined) $('xtal').value = Number(xtal).toFixed(2);
   if (call !== '-') $('ft8call').value = call;
   if (grid !== '-') $('ft8grid').value = grid;
   $('ft8txf').value = String(ft8hz);
@@ -1327,6 +1329,7 @@ $('ft8halt').addEventListener('click', ft8Halt);
 $('ft8call').addEventListener('change', () => stationSet('call', $('ft8call').value.trim().toUpperCase()));
 $('ft8grid').addEventListener('change', () => stationSet('grid', $('ft8grid').value.trim()));
 $('ft8txf').addEventListener('change', () => stationSet('ft8hz', String(Math.round(Number($('ft8txf').value) || 1500))));
+$('xtal').addEventListener('change', () => stationSet('xtal', (Number($('xtal').value) || 0).toFixed(2)));
 $('ft8call').value = store.get('ft8call', ''); $('ft8grid').value = store.get('ft8grid', ''); $('ft8txf').value = store.get('ft8txf', '1500');
 ft8Settings();
 
