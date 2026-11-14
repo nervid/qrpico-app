@@ -311,9 +311,9 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
   <button id="mmute">Mute</button>
   <button id="mptt" class="ptt" aria-pressed="false">PTT</button>
 </div>
-<script src="ft8.js"></script>
-<script src="ft4.js"></script>
-<script src="wspr.js"></script>
+<script src="ft8.js?v=67876dc"></script>
+<script src="ft4.js?v=67876dc"></script>
+<script src="wspr.js?v=67876dc"></script>
 <script>
 'use strict';
 // ---------------------------------------------------------------- protocol (docs/usb-protocol.md)
@@ -1157,7 +1157,7 @@ function ft8Tick() {
   }
   if (have < m.need) { $('ft8st').textContent = `slot ${hms(slot)}: only ${(have / 12000).toFixed(1)} s of audio, not decoded`; return; }
   if (!F.worker) {
-    F.worker = new Worker('ft8worker.js');
+    F.worker = new Worker('ft8worker.js?v=67876dc');
     F.worker.onmessage = e => ft8Result(e.data);
     F.worker.onerror = e => { F.busy = false; log('FT8 worker: ' + e.message); };
   }
@@ -1169,7 +1169,7 @@ function ft8Tick() {
 const hms = t => new Date(t * 1000).toISOString().slice(11, 21).replace(/:/g, '').replace(/\.0$/, '');   // FT4 slots: 123007.5
 function ft8Result(r) {
   F.busy = false;
-  if (r.mode !== F.mode) return;                          // switched while decoding
+  if (r.mode && r.mode !== F.mode) return;               // switched while decoding
   const list = $('ft8list'), dial = S.wanted, usb = (S.status ? S.status.mode : modeNames.indexOf(S.mode)) !== 2;
   const dts = r.decodes.map(d => d.dt).sort((a, b) => a - b), med = dts.length ? dts[dts.length >> 1] : null;
   $('ft8st').textContent = `slot ${hms(r.slot)}: ${r.decodes.length} decode${r.decodes.length === 1 ? '' : 's'}, ${r.ms} ms` +
@@ -1508,7 +1508,7 @@ function wsprTick() {
       if (have < 100 * 12000) $('wsprst').textContent = `period ${hm(period)}: only ${(have / 12000).toFixed(0)} s of audio, not decoded`;
       else {
         if (!WS.worker) {
-          WS.worker = new Worker('wsprworker.js');
+          WS.worker = new Worker('wsprworker.js?v=67876dc');
           WS.worker.onmessage = e => wsprResult(e.data);
           WS.worker.onerror = e => { WS.busy = false; log('WSPR worker: ' + e.message); };
         }
