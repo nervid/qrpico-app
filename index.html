@@ -81,7 +81,7 @@ label.inline { display: flex; gap: 6px; align-items: center; color: var(--muted)
 #ft8wfo { pointer-events: none; }
 #v-ft8 .ft8list { max-height: none; flex: 1; min-height: 200px; }
 .ft8list { font: 12px var(--mono); max-height: 280px; overflow-y: auto; margin-top: 6px; border-top: 1px solid var(--line); }
-.ft8row { display: grid; grid-template-columns: 4.6em 2.6em 3.2em 3.4em minmax(0, 1fr); gap: 0 6px; padding: 2px 0; }
+.ft8row { display: grid; grid-template-columns: 5.2em 2.6em 3.2em 3.4em minmax(0, 1fr); gap: 0 6px; padding: 2px 0; }
 .ft8row > span:last-child { overflow-wrap: anywhere; }
 .ft8row.cq > span:last-child { color: var(--ok); font-weight: 600; }
 .ft8row.slot { border-top: 1px solid var(--line); margin-top: 2px; }
@@ -250,7 +250,7 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
       <p class="note" style="margin:0">Audio 0 – 3.2 kHz of the USB passband. Tap / click to set the TX frequency (red: your signal). Calls of the last slot at their frequency.</p>
       <div class="row"><select id="ft8mode" aria-label="Mode"><option value="FT8">FT8</option><option value="FT4">FT4</option></select><button id="ft8on">Decode FT8</button><button id="ft8clear">Clear</button></div>
       <div class="freqwarn" id="ft8fw" role="status" hidden><span></span><button type="button">Tune</button></div>
-      <p class="note" id="ft8st">Decodes every 15 s slot from the board's receive audio (USB, e.g. 14.074 MHz). Needs the PC / phone clock within about ±1 s (NTP).</p>
+      <p class="note" id="ft8st">Decodes every slot (FT8 15 s, FT4 7.5 s) from the board's receive audio (USB, e.g. 14.074 MHz). Needs the PC / phone clock within about ±1 s (NTP).</p>
       <div class="field" style="margin-top:6px">
         <span>my call</span><input id="ft8call" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="e.g. OE3XYZ" aria-label="My call sign">
         <span>my grid</span><input id="ft8grid" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="e.g. JN88ee" maxlength="6" aria-label="My locator, 4 or 6 characters">
@@ -1166,7 +1166,7 @@ function ft8Tick() {
   const fast = matchMedia('(pointer: coarse)').matches ? { stall: 6, maxCand2: 120 } : {};
   F.worker.postMessage({ slot, mode: F.mode, audio, opt: Object.assign({ fmin: 150, fmax: 3100 }, fast) }, [audio.buffer]);
 }
-const hms = t => new Date(t * 1000).toISOString().slice(11, 19).replace(/:/g, '');
+const hms = t => new Date(t * 1000).toISOString().slice(11, 21).replace(/:/g, '').replace(/\.0$/, '');   // FT4 slots: 123007.5
 function ft8Result(r) {
   F.busy = false;
   if (r.mode !== F.mode) return;                          // switched while decoding
@@ -1428,12 +1428,12 @@ function ft8WfRow() {
     for (let r = 0; r < rowH; r++) { const o = 4 * (r * W + x); img.data[o] = lut[3 * v]; img.data[o + 1] = lut[3 * v + 1]; img.data[o + 2] = lut[3 * v + 2]; img.data[o + 3] = 255; }
   }
   g.putImageData(img, 0, 0);
-  const slot = Math.floor(Date.now() / 15000);
+  const slot = Math.floor(Date.now() / (DM().slot * 1000));   // FT8 15 s, FT4 7.5 s
   if (slot !== V.lastSlot) {                      // slot start: a line and the time
     V.lastSlot = slot;
     g.fillStyle = 'rgba(230,236,245,0.55)'; g.fillRect(0, 0, W, Math.max(1, Math.round(dpr)));
     g.font = `${10 * dpr}px ui-monospace, monospace`; g.textBaseline = 'top'; g.fillStyle = 'rgba(230,236,245,0.85)';
-    g.fillText(new Date(slot * 15000).toISOString().slice(11, 19), 4 * dpr, 2 * dpr);
+    g.fillText(new Date(slot * DM().slot * 1000).toISOString().slice(11, 21).replace(/\.0$/, ''), 4 * dpr, 2 * dpr);
   }
 }
 // overlay: frequency scale, own TX band, calls of the last slot (non-overlapping, three rows)
