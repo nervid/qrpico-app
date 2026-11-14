@@ -44,12 +44,12 @@ main { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 12px; pa
 .unit { color: var(--muted); }
 .group { display: flex; gap: 4px; align-items: center; }
 .canvases { position: relative; flex: 1; min-height: 360px; display: flex; flex-direction: column; border-radius: 8px; overflow: hidden; border: 1px solid var(--line); background: var(--spec-bg); }
-#spec { height: var(--spec-h, 240px); min-height: 110px; width: calc(100% - 26px); display: block; cursor: crosshair; flex: none; }
+#spec { height: var(--spec-h, 240px); min-height: 110px; width: calc(100% - 26px); display: block; cursor: crosshair; flex: none; touch-action: pan-y; }
 .split { flex: none; height: 7px; cursor: row-resize; background: #1a2230; border-top: 1px solid #2c3850; border-bottom: 1px solid #2c3850; touch-action: none; }
 .split:hover, .split.drag { background: #2c3c58; }
 .wfbox { position: relative; flex: 1; min-height: 140px; display: flex; }
 #wf, #wfo { position: absolute; inset: 0 26px 0 0; width: calc(100% - 26px); height: 100%; display: block; }
-#wf { cursor: crosshair; }
+#wf { cursor: crosshair; touch-action: pan-y; }   /* horizontal drags tune, vertical ones scroll the page */
 #wfo { pointer-events: none; }
 #wfscale { position: absolute; right: 0; top: 0; width: 26px; height: 100%; display: block; }
 .readout { position: absolute; top: 6px; right: 8px; text-align: right; font: 12px var(--mono); color: #c9d4e3; pointer-events: none; text-shadow: 0 1px 2px #000; }
@@ -68,7 +68,18 @@ label.inline { display: flex; gap: 6px; align-items: center; color: var(--muted)
 .range input[type=number] { width: 70px; padding: 2px 6px; }
 .range select { padding: 2px 6px; font: 12px var(--mono); }
 .chip.tx { color: #fff; background: #c62828; border-color: #c62828; font-weight: 700; }
-.ptt { width: 100%; padding: 14px; font-size: 16px; font-weight: 700; letter-spacing: 0.04em; touch-action: none; user-select: none; }
+.ptt { width: 100%; padding: 14px; font-size: 16px; font-weight: 700; letter-spacing: 0.04em; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.stepbtn { min-width: 2.4em; font-weight: 700; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+/* touch screens: larger targets (about 44 px), larger frequency, the PTT button taller */
+@media (pointer: coarse) {
+  button, select, input:not([type=range]):not([type=checkbox]) { min-height: 44px; padding: 8px 14px; font-size: 16px; }
+  input[type=range] { min-height: 32px; }
+  input[type=checkbox] { width: 22px; height: 22px; }
+  .freq { font-size: 24px; width: 11ch; }
+  .ptt { padding: 22px; font-size: 18px; }
+  header { gap: 6px 10px; padding: 8px 12px; }
+  .chip { font-size: 11px; }
+}
 .ptt.on { background: #c62828; border-color: #c62828; color: #fff; }
 .meter.tx > div { background: var(--warn); }
 .meter { height: 8px; background: var(--line); border-radius: 4px; overflow: hidden; flex: 1; align-self: center; }
@@ -110,7 +121,9 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
   <section class="view">
     <div class="controls">
       <div class="group">
+        <button id="fdown" class="stepbtn" aria-label="One step down" title="One step down (hold: repeat)">−</button>
         <input id="freq" class="freq" inputmode="decimal" value="14.074000" aria-label="Frequency" title="MHz (14.074), kHz (14074) or Hz; Enter tunes">
+        <button id="fup" class="stepbtn" aria-label="One step up" title="One step up (hold: repeat)">+</button>
         <span class="unit">MHz</span>
         <select id="step" aria-label="Tuning step" title="Step for ← → and the wheel">
           <option value="10">10 Hz</option><option value="100" selected>100 Hz</option><option value="500">500 Hz</option>
@@ -138,7 +151,7 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
       <span id="sig" class="sig" title="Power in the receive passband (dBFS)">– dBFS</span>
     </div>
     <p id="helptext" class="note" hidden>
-      Click spectrum or waterfall: tune · Wheel / <kbd>←</kbd> <kbd>→</kbd>: one step (Shift ×10) · <kbd>↑</kbd> <kbd>↓</kbd>: 1 kHz ·
+      Click / tap spectrum or waterfall: tune there · drag sideways: move the band under the finger (by the step) · − / + (hold: repeat) · Wheel / <kbd>←</kbd> <kbd>→</kbd>: one step (Shift ×10) · <kbd>↑</kbd> <kbd>↓</kbd>: 1 kHz ·
       <kbd>Space</kbd>: PTT · <kbd>U</kbd> / <kbd>L</kbd>: USB / LSB · <kbd>M</kbd>: mute · <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd>: 40 / 20 / 10 m.
       Frequency field: 14.074 (MHz), 14074 (kHz) or 14074000 (Hz).
     </p>
@@ -183,7 +196,7 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
       <div class="row" style="margin-top:6px"><span class="note" style="margin:0">mic</span><div class="meter tx"><div id="mlevel"></div></div></div>
       <div class="row" style="margin-top:6px"><span class="note" style="margin:0">at board</span><div class="meter tx"><div id="blevel"></div></div></div>
       <button id="ptt" class="ptt" style="margin-top:8px" aria-pressed="false">PTT (hold, or Space)</button>
-      <div class="row" style="margin-top:6px"><label class="inline"><input id="latch" type="checkbox"> latching</label><button id="tunebtn" title="1 kHz tone at -10 dB while held">Tune</button><label class="inline"><input id="txloop" type="checkbox"> txmon loop</label></div>
+      <div class="row" style="margin-top:6px"><label class="inline"><input id="latch" type="checkbox"> latching</label><button id="tunebtn" class="stepbtn" title="1 kHz tone at -10 dB while held">Tune</button><label class="inline"><input id="txloop" type="checkbox"> txmon loop</label></div>
       <p class="note" id="txnote">Mic on, then hold PTT: the microphone goes to the board (WebUSB stream, or its USB audio output if one is chosen) only while PTT is on.</p>
     </div>
     <details class="panel" id="p-status">
@@ -1089,6 +1102,7 @@ async function setPtt(on, fromBoard = false) {
 }
 (() => {
   const b = $('ptt');
+  b.addEventListener('contextmenu', e => e.preventDefault());           // long press on a touch screen
   b.addEventListener('pointerdown', e => {
     e.preventDefault();
     if ($('latch').checked) {
@@ -1099,6 +1113,7 @@ async function setPtt(on, fromBoard = false) {
   const up = () => { if (!$('latch').checked) setPtt(false); };
   b.addEventListener('pointerup', up); b.addEventListener('pointercancel', up);
   const t = $('tunebtn');
+  t.addEventListener('contextmenu', e => e.preventDefault());
   t.addEventListener('pointerdown', e => { e.preventDefault(); t.setPointerCapture(e.pointerId); TXA.tuning = true; setPtt(true); applyMic(); });
   const tup = () => { if (TXA.tuning) setPtt(false); };
   t.addEventListener('pointerup', tup); t.addEventListener('pointercancel', tup);
@@ -1133,9 +1148,50 @@ function tune(f) {
 const step = () => Number($('step').value);
 function setMode(m) { S.mode = m; cmd(`mode ${m}`); drawSpectrum(); drawWfOverlay(); store.set('mode', m);
   document.querySelectorAll('[data-mode]').forEach(b => b.classList.toggle('active', b.dataset.mode === m)); }
+// - / + : one step; held (touch or mouse): repeats after 0.4 s, 12 steps per second
+for (const [id, dir] of [['fdown', -1], ['fup', 1]]) {
+  const b = $(id); let t1 = 0, t2 = 0;
+  const once = () => { const st = step(); tune(Math.round(S.wanted / st) * st + dir * st); };
+  const stop = () => { clearTimeout(t1); clearInterval(t2); };
+  b.addEventListener('pointerdown', e => {
+    if (e.button > 0) return;
+    e.preventDefault(); b.setPointerCapture(e.pointerId); once();
+    t1 = setTimeout(() => { t2 = setInterval(once, 80); }, 400);
+  });
+  b.addEventListener('pointerup', stop); b.addEventListener('pointercancel', stop);
+  b.addEventListener('click', e => { if (e.detail === 0) once(); });   // keyboard (Enter) only; pointers are handled above
+  b.addEventListener('contextmenu', e => e.preventDefault());
+}
 for (const id of ['spec', 'wf']) {
   const c = $(id);
-  c.addEventListener('click', e => { if (!S.spec) return; const r = c.getBoundingClientRect(); tune(fOf(e.clientX - r.left, S.spec, r.width)); });
+  // tap / click: tune there; drag sideways: the band follows the finger (frequency moves the other way),
+  // in whole steps, at most ~16 tune commands per second, the last one on release
+  let drag = null;
+  c.addEventListener('pointerdown', e => {
+    if (!S.spec || e.button > 0) return;
+    drag = { id: e.pointerId, x0: e.clientX, y0: e.clientY, f0: S.wanted, moved: false, last: 0, sent: S.wanted };
+  });
+  c.addEventListener('pointermove', e => {
+    if (!drag || e.pointerId !== drag.id) return;
+    const dx = e.clientX - drag.x0;
+    if (!drag.moved) {
+      if (Math.abs(e.clientY - drag.y0) > 10 && Math.abs(dx) < 10) { drag = null; return; }   // vertical: page scroll
+      if (Math.abs(dx) < 8) return;
+      drag.moved = true; c.setPointerCapture(e.pointerId);
+    }
+    const r = c.getBoundingClientRect(), span = fOf(r.width, S.spec, r.width) - fOf(0, S.spec, r.width);
+    const st = step(), f = Math.round((drag.f0 - dx * span / r.width) / st) * st;
+    const now = performance.now();
+    if (f !== drag.sent && now - drag.last > 60) { tune(f); drag.sent = f; drag.last = now; }
+    drag.want = f;
+  });
+  const endDrag = e => {
+    if (!drag || e.pointerId !== drag.id) return;
+    const d = drag; drag = null;
+    if (d.moved) { if (d.want !== undefined && d.want !== d.sent) tune(d.want); return; }
+    if (e.type === 'pointerup') { const r = c.getBoundingClientRect(); tune(fOf(e.clientX - r.left, S.spec, r.width)); }
+  };
+  c.addEventListener('pointerup', endDrag); c.addEventListener('pointercancel', endDrag);
   c.addEventListener('wheel', e => { e.preventDefault(); const st = step() * (e.shiftKey ? 10 : 1); tune(Math.round(S.wanted / st) * st + (e.deltaY < 0 ? st : -st)); }, { passive: false });
   c.addEventListener('mousemove', e => {
     if (!S.spec) return; const r = c.getBoundingClientRect(), f = fOf(e.clientX - r.left, S.spec, r.width);
