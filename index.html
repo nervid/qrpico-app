@@ -89,6 +89,17 @@ label.inline { display: flex; gap: 6px; align-items: center; color: var(--muted)
 .wsprrow { display: grid; grid-template-columns: 3.4em 2.6em 3.2em 6.3em 2.4em minmax(0, 1fr) 3.6em 2.6em 4.2em; gap: 0 6px; padding: 2px 0; }
 .wsprrow.slot { border-top: 1px solid var(--line); margin-top: 2px; }
 #v-wspr .ft8list { max-height: none; flex: 1; min-height: 200px; }
+.cwscope { position: relative; height: 150px; border-radius: 8px; overflow: hidden; border: 1px solid var(--line); background: var(--spec-bg); flex: none; }
+#cwsc, #cwsco { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+#cwsc { cursor: crosshair; touch-action: pan-y; }
+#cwsco { pointer-events: none; }
+@media (max-width: 520px) { .cwscope { height: 120px; } }
+/* wide screens in CW mode: the CW panel next to the spectrum (it then needs no scope of its own) */
+.view.cwside { display: grid; grid-template-columns: minmax(0, 1fr) 380px; grid-template-rows: auto auto minmax(0, 1fr); column-gap: 12px; }
+.view.cwside > :not(#v-spec):not(#v-cw) { grid-column: 1 / -1; }
+.view.cwside > #v-spec { grid-column: 1; }
+.view.cwside > #v-cw { grid-column: 2; grid-row: 3; }
+.view.cwside #cwscope, .view.cwside .cwscope-note { display: none; }
 .cwlog { font: 14px var(--mono); flex: 1; min-height: 160px; max-height: 50vh; overflow-y: auto; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .cwlog .tx { color: var(--warn); }
 .cwlog .unc { opacity: 0.5; }
@@ -236,6 +247,12 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
     </div>
     </div>
     <div id="v-cw" class="tabview" hidden>
+      <div class="cwscope" id="cwscope">
+        <canvas id="cwsc"></canvas>
+        <canvas id="cwsco"></canvas>
+        <div id="cwro" class="readout"></div>
+      </div>
+      <p class="note cwscope-note" style="margin:0">±5 kHz around the shown frequency. Tap / click a signal to tune to it (it is then zero-beaten on 600 Hz), drag to move.</p>
       <div class="freqwarn" id="cwfw" role="status" hidden><span></span><button type="button">CW mode</button></div>
       <div class="row"><span class="note" id="cwrx" style="margin:0;flex:1">decoder: waiting for a signal</span><button id="cwzero" title="Tune so that the decoded station sits on 600 Hz (and you transmit on its frequency)">Zero beat</button><button id="cwclear">Clear</button></div>
       <div class="cwlog" id="cwlog" role="log" aria-label="CW transcript"></div>
@@ -335,10 +352,10 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
   <button id="mmute">Mute</button>
   <button id="mptt" class="ptt" aria-pressed="false">PTT</button>
 </div>
-<script src="ft8.js?v=2b9ecfc"></script>
-<script src="ft4.js?v=2b9ecfc"></script>
-<script src="wspr.js?v=2b9ecfc"></script>
-<script src="cw.js?v=2b9ecfc"></script>
+<script src="ft8.js?v=77be10c"></script>
+<script src="ft4.js?v=77be10c"></script>
+<script src="wspr.js?v=77be10c"></script>
+<script src="cw.js?v=77be10c"></script>
 <script>
 'use strict';
 // ---------------------------------------------------------------- protocol (docs/usb-protocol.md)
@@ -705,7 +722,7 @@ function onFrame(type, flags, p) {
     const xr = t.match(/^xtal ref: ([+-][\d.]+) ppm/m);
     if (xr && S.xtalCal) { store.set('xtalref', Number(xr[1])); S.xtalCal = false; }
   }
-  else if (type === T_SPECTRUM) { S.spec = parseSpectrum(p); if (!S.status) S.wanted = S.spec.wanted; drawSpectrum(); pushWaterfall(); }
+  else if (type === T_SPECTRUM) { S.spec = parseSpectrum(p); if (!S.status) S.wanted = S.spec.wanted; drawSpectrum(); pushWaterfall(); cwScopeRow(); }
   else if (type === T_STATUS) { S.status = parseStatus(p); updateStatus(); txRate(); }
   else if (type === T_AUDIO) rxAudioFrame(p);
 }
@@ -731,7 +748,9 @@ function updateStatus() {
                           ['TX ring / underruns', `${s.txRing} / ${s.txUnder + s.txUsbUnder}`]] : []),
   ];
   $('status').tBodies[0].innerHTML = rows.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('');
+  const m0 = S.mode;
   S.mode = modeNames[s.mode] || 'usb';
+  if (S.mode !== m0) cwLayout();
   if (s.filter !== undefined && document.activeElement !== $('filter') && $('filter').value !== String(s.filter)) $('filter').value = String(s.filter);
   document.querySelectorAll('[data-mode]').forEach(b => b.classList.toggle('active', b.dataset.mode === S.mode));
   document.querySelectorAll('[data-band]').forEach(b => b.classList.toggle('active', Number(b.dataset.band) === s.band));
@@ -1037,11 +1056,11 @@ function rxAudioFrame(p) {
   if (F.on || WS.on) ft8Collect(first, s);
   if (V.tab === 'ft8') ft8WfFeed(s);
   else if (V.tab === 'wspr') wsprWfFeed(s);
-  else if (V.tab === 'cw') cwFeed(s);
+  if (!$('v-cw').hidden) cwFeed(s);
   if (A.node) A.node.port.postMessage({ first, s }, [s.buffer]);
 }
 // the WebUSB audio stream runs while the player or the FT8 decoder needs it
-function audioStream() { if (link) cmd(`stream audio ${A.node || F.on || WS.on || ['ft8', 'wspr', 'cw'].includes(V.tab) ? 'on' : 'off'}`, true); }
+function audioStream() { if (link) cmd(`stream audio ${A.node || F.on || WS.on || ['ft8', 'wspr', 'cw'].includes(V.tab) || !$('v-cw').hidden ? 'on' : 'off'}`, true); }
 // Device names appear only while the page holds the microphone permission. With a one-time grant
 // (and on file:// pages) it can end when the last stream stops, so the list is taken while the
 // permission stream is still open, and the last list with names is kept (A.devs).
@@ -1197,7 +1216,7 @@ function ft8Tick() {
   }
   if (have < m.need) { $('ft8st').textContent = `slot ${hms(slot)}: only ${(have / 12000).toFixed(1)} s of audio, not decoded`; return; }
   if (!F.worker) {
-    F.worker = new Worker('ft8worker.js?v=2b9ecfc');
+    F.worker = new Worker('ft8worker.js?v=77be10c');
     F.worker.onmessage = e => ft8Result(e.data);
     F.worker.onerror = e => { F.busy = false; log('FT8 worker: ' + e.message); };
   }
@@ -1443,8 +1462,93 @@ function cwFeed(s) {
   for (let i = 0; i < s.length; i++) x[i] = s[i] / 32768;
   CWD.dec.push(x);
   const i = CWD.dec.info();
+  if (CWD.zeroUntil && Date.now() < CWD.zeroUntil && i.snrDb >= 15 && Math.abs(i.pitch - 600) >= 5 && CWD.dec.d.some(d => d.marks.length >= 4)) {
+    CWD.zeroUntil = 0; cwZeroBeat();
+  }
   $('cwrx').textContent = i.snrDb >= 13 ? `decoder: ${i.wpm} wpm, ${i.snrDb} dB, tone ${i.pitch} Hz` : `decoder: waiting for a signal (tone ${i.pitch} Hz)`;
 }
+// a new frequency in CW mode: a fresh decoder, and once it has the station's tone, zero beat on 600 Hz
+function cwRetuned() {
+  CWD.dec = null; CWD.line = null; CWD.zeroUntil = Date.now() + 6000;
+}
+function cwZeroBeat() {
+  const p = CWD.dec.info().pitch;
+  if (Math.abs(p - 600) >= 5) tune(S.wanted + Math.round(p - 600), true);   // the carrier is p - 600 Hz from the shown frequency
+  CWD.dec.d.forEach(d => { d.pitch = 600; });
+}
+// scope: the board's spectrum (91.55 Hz bins) over +-5 kHz around the shown frequency as a waterfall
+const CWS = { span: 10000, lastF: null };
+function cwScopeVisible() { return !$('v-cw').hidden && !document.querySelector('.view').classList.contains('cwside'); }
+function cwScopeRow() {
+  if (!S.spec || !cwScopeVisible()) return;
+  const c = $('cwsc'), resized = fit(c), g = c.getContext('2d'), W = c.width, H = c.height, dpr = window.devicePixelRatio || 1;
+  if (!W || !H) return;
+  const sp = S.spec, d = displayDb(sp), s0 = spanOf(sp), f0 = S.wanted - CWS.span / 2;
+  if (resized || CWS.lastF === null) { g.fillStyle = css('--spec-bg'); g.fillRect(0, 0, W, H); cwScopeOverlay(); }
+  const rowH = Math.max(1, Math.round(dpr));
+  const dx = CWS.lastF === null ? 0 : -(S.wanted - CWS.lastF) / CWS.span * W;   // retuned: the history moves along
+  g.drawImage(c, 0, 0, W, H - rowH, Math.round(dx), rowH, W, H - rowH);
+  if (dx) { g.fillStyle = css('--spec-bg'); if (dx > 0) g.fillRect(0, rowH, Math.ceil(dx), H); else g.fillRect(W + Math.floor(dx), rowH, -Math.floor(dx), H); }
+  CWS.lastF = S.wanted;
+  const row = new Float32Array(W);
+  for (let x = 0; x < W; x++) {
+    const k = (f0 + (x + 0.5) / W * CWS.span - s0.f0) / sp.binHz - 0.5, k0 = Math.floor(k), a = k - k0;
+    const v0 = d[Math.max(0, Math.min(d.length - 1, k0))], v1 = d[Math.max(0, Math.min(d.length - 1, k0 + 1))];
+    row[x] = v0 + a * (v1 - v0);
+  }
+  const [lo, hi] = wfRange(row), img = g.createImageData(W, rowH);
+  for (let x = 0; x < W; x++) {
+    const v = Math.max(0, Math.min(255, Math.round((row[x] - lo) / (hi - lo) * 255)));
+    for (let r = 0; r < rowH; r++) { const o = 4 * (r * W + x); img.data[o] = lut[3 * v]; img.data[o + 1] = lut[3 * v + 1]; img.data[o + 2] = lut[3 * v + 2]; img.data[o + 3] = 255; }
+  }
+  g.putImageData(img, 0, 0);
+}
+function cwScopeOverlay() {
+  if (!cwScopeVisible()) return;
+  const c = $('cwsco'); fit(c);
+  const g = c.getContext('2d'), W = c.width, H = c.height, dpr = window.devicePixelRatio || 1;
+  if (!W || !H) return;
+  g.clearRect(0, 0, W, H);
+  const xOfF = f => (f - (S.wanted - CWS.span / 2)) / CWS.span * W;
+  const [p0, p1] = passband();
+  g.fillStyle = 'rgba(255,255,255,0.10)'; g.fillRect(xOfF(p0), 0, Math.max(dpr, xOfF(p1) - xOfF(p0)), H);
+  g.fillStyle = '#e53935'; g.fillRect(Math.round(W / 2 - dpr / 2), 0, Math.max(1, Math.round(dpr)), H);   // own TX = shown frequency
+  g.font = `${10 * dpr}px ui-monospace, monospace`; g.textBaseline = 'bottom'; g.fillStyle = 'rgba(230,236,245,0.85)';
+  const stepK = W / dpr < 500 ? 2000 : 1000;
+  for (let f = Math.ceil((S.wanted - CWS.span / 2) / 1000) * 1000; f <= S.wanted + CWS.span / 2; f += 1000) {
+    const x = xOfF(f); g.fillRect(x, H - 5 * dpr, dpr, 5 * dpr);
+    if (f % stepK === 0) g.fillText((f / 1e6).toFixed(3), x + 2 * dpr, H - dpr);
+  }
+}
+(() => {
+  // tap / click: tune to the signal (then zero beat); drag sideways: the band follows the finger, 10 Hz steps
+  const c = $('cwsc'); let drag = null;
+  const fAt = x => S.wanted - CWS.span / 2 + x / c.getBoundingClientRect().width * CWS.span;
+  c.addEventListener('pointerdown', e => { if (e.button > 0) return; drag = { id: e.pointerId, x0: e.clientX, y0: e.clientY, f0: S.wanted, moved: false, last: 0 }; });
+  c.addEventListener('pointermove', e => {
+    const r = c.getBoundingClientRect();
+    $('cwro').textContent = `${(fAt(e.clientX - r.left) / 1e6).toFixed(4)} MHz`;
+    if (!drag || e.pointerId !== drag.id) return;
+    const dx = e.clientX - drag.x0;
+    if (!drag.moved) {
+      if (Math.abs(e.clientY - drag.y0) > 10 && Math.abs(dx) < 10) { drag = null; return; }
+      if (Math.abs(dx) < 8) return;
+      drag.moved = true; c.setPointerCapture(e.pointerId);
+    }
+    const f = Math.round((drag.f0 - dx * CWS.span / r.width) / 10) * 10, now = performance.now();
+    if (f !== S.wanted && now - drag.last > 60) { tune(f); drag.last = now; }
+    drag.want = f;
+  });
+  const end = e => {
+    if (!drag || e.pointerId !== drag.id) return;
+    const d = drag; drag = null;
+    if (d.moved) { if (d.want !== undefined && d.want !== S.wanted) tune(d.want); return; }
+    if (e.type === 'pointerup') tune(fAt(e.clientX - c.getBoundingClientRect().left));
+  };
+  c.addEventListener('pointerup', end); c.addEventListener('pointercancel', end);
+  c.addEventListener('mouseleave', () => { $('cwro').textContent = ''; });
+  window.addEventListener('resize', cwScopeOverlay);
+})();
 function cwRx(t, info) {
   const now = Date.now();
   if (!CWD.line || now - CWD.lastT > 8000) {
@@ -1494,9 +1598,7 @@ function cwShow() {
   $('cwclear').addEventListener('click', () => { $('cwlog').textContent = ''; CWD.line = null; });
   $('cwzero').addEventListener('click', () => {
     if (!CWD.dec || S.mode !== 'cw') return;
-    const p = CWD.dec.info().pitch;
-    tune(S.wanted + (p - 600));           // the station's carrier is p - 600 Hz from the shown frequency
-    CWD.dec.d.forEach(d => { d.pitch = 600; });
+    cwZeroBeat();
   });
   $('cwfw').querySelector('button').addEventListener('click', () => setMode('cw'));
   $('cwwpm').value = store.get('cwwpm', '20'); $('cwhis').value = store.get('cwhis', '');
@@ -1505,12 +1607,23 @@ function cwShow() {
 })();
 
 // ---- view tabs: Spectrum (the wide RF view) and FT8 (audio waterfall, decodes, TX)
+// wide screens: in CW mode the CW panel stands next to the spectrum while the Spectrum tab is open
+const wideCw = matchMedia('(min-width: 1200px)');
+function cwLayout() {
+  const side = wideCw.matches && S.mode === 'cw' && V.tab === 'spec';
+  document.querySelector('.view').classList.toggle('cwside', side);
+  $('v-cw').hidden = !(side || V.tab === 'cw');
+  if (side || V.tab === 'cw') cwShow();
+  audioStream();
+}
+wideCw.addEventListener('change', () => { cwLayout(); drawSpectrum(); });
 function setTab(tab) {
   V.tab = tab; store.set('tab', tab);
   document.querySelectorAll('[data-tab]').forEach(b => b.setAttribute('aria-selected', String(b.dataset.tab === tab)));
   $('v-spec').hidden = tab !== 'spec'; $('v-ft8').hidden = tab !== 'ft8'; $('v-wspr').hidden = tab !== 'wspr'; $('v-cw').hidden = tab !== 'cw';
+  cwLayout();
   audioStream();
-  if (tab === 'spec') { S.fLoWf = null; drawSpectrum(); drawWfOverlay(); } else if (tab === 'ft8') ft8WfOverlay(); else if (tab === 'wspr') wsprWfOverlay(); else cwShow();
+  if (tab === 'spec') { S.fLoWf = null; drawSpectrum(); drawWfOverlay(); } else if (tab === 'ft8') ft8WfOverlay(); else if (tab === 'wspr') wsprWfOverlay(); else { CWS.lastF = null; cwScopeOverlay(); }
 }
 document.querySelectorAll('[data-tab]').forEach(b => b.addEventListener('click', () => setTab(b.dataset.tab)));
 
@@ -1626,7 +1739,7 @@ function wsprTick() {
       if (have < 100 * 12000) $('wsprst').textContent = `period ${hm(period)}: only ${(have / 12000).toFixed(0)} s of audio, not decoded`;
       else {
         if (!WS.worker) {
-          WS.worker = new Worker('wsprworker.js?v=2b9ecfc');
+          WS.worker = new Worker('wsprworker.js?v=77be10c');
           WS.worker.onmessage = e => wsprResult(e.data);
           WS.worker.onerror = e => { WS.busy = false; log('WSPR worker: ' + e.message); };
         }
@@ -2046,9 +2159,11 @@ function parseFreq(t) {
   if (u === 'm') return v * 1e6;
   return v < 100 ? v * 1e6 : v < 1e5 ? v * 1e3 : v;
 }
-function tune(f) {
+function tune(f, keepDecoder = false) {
   f = Math.round(f / 10) * 10; S.wanted = f; $('freq').value = fmtHz(f); cmd(`tune ${f}`); drawSpectrum(); drawWfOverlay();
   store.set('freq', f);
+  if (S.mode === 'cw' && !keepDecoder) cwRetuned();
+  cwScopeOverlay();
 }
 const step = () => Number($('step').value);
 // the filter is remembered per mode group (SSB: 2.8 / 2.4 / 1.8 kHz, CW: 500 / 250 Hz); the board itself
@@ -2056,6 +2171,7 @@ const step = () => Number($('step').value);
 const filterKey = m => m === 'cw' ? 'filter-cw' : 'filter-ssb';
 function setMode(m) {
   S.mode = m; cmd(`mode ${m}`); store.set('mode', m);
+  cwLayout();
   if (m !== 'iq') setFilter(store.get(filterKey(m), m === 'cw' ? 3 : 0), false);
   drawSpectrum(); drawWfOverlay();
   document.querySelectorAll('[data-mode]').forEach(b => b.classList.toggle('active', b.dataset.mode === m));
@@ -2064,7 +2180,7 @@ function setFilter(f, remember = true) {
   f = Number(f) || 0; S.filter = f; $('filter').value = String(f);
   cmd(`filter ${FILTERS[f].name}`, true);
   if (remember) store.set(filterKey(S.mode), f);
-  drawSpectrum(); drawWfOverlay(); digiWarn();
+  drawSpectrum(); drawWfOverlay(); digiWarn(); cwScopeOverlay();
 }
 // - / + : one step; held (touch or mouse): repeats after 0.4 s, 12 steps per second
 for (const [id, dir] of [['fdown', -1], ['fup', 1]]) {
