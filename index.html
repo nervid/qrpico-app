@@ -91,6 +91,7 @@ label.inline { display: flex; gap: 6px; align-items: center; color: var(--muted)
 #v-wspr .ft8list { max-height: none; flex: 1; min-height: 200px; }
 .cwlog { font: 14px var(--mono); flex: 1; min-height: 160px; max-height: 50vh; overflow-y: auto; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .cwlog .tx { color: var(--warn); }
+.cwlog .unc { opacity: 0.5; }
 .cwlog .t { color: var(--muted); font-size: 11px; }
 .cwsend input { flex: 1; min-width: 0; font: 14px var(--mono); text-transform: uppercase; }
 .cwmacros { flex-wrap: wrap; }
@@ -236,6 +237,7 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
     </div>
     <div id="v-cw" class="tabview" hidden>
       <div class="freqwarn" id="cwfw" role="status" hidden><span></span><button type="button">CW mode</button></div>
+      <div class="row"><span class="note" id="cwrx" style="margin:0;flex:1">decoder: waiting for a signal</span><button id="cwzero" title="Tune so that the decoded station sits on 600 Hz (and you transmit on its frequency)">Zero beat</button><button id="cwclear">Clear</button></div>
       <div class="cwlog" id="cwlog" role="log" aria-label="CW transcript"></div>
       <div class="row cwsend"><input id="cwtext" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="text to send, Enter" aria-label="CW text to send"><button id="cwsend">Send</button><button id="cwstop">Stop</button></div>
       <div class="row cwmacros" id="cwmacros"></div>
@@ -333,9 +335,10 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
   <button id="mmute">Mute</button>
   <button id="mptt" class="ptt" aria-pressed="false">PTT</button>
 </div>
-<script src="ft8.js?v=16373b5"></script>
-<script src="ft4.js?v=16373b5"></script>
-<script src="wspr.js?v=16373b5"></script>
+<script src="ft8.js?v=2b9ecfc"></script>
+<script src="ft4.js?v=2b9ecfc"></script>
+<script src="wspr.js?v=2b9ecfc"></script>
+<script src="cw.js?v=2b9ecfc"></script>
 <script>
 'use strict';
 // ---------------------------------------------------------------- protocol (docs/usb-protocol.md)
@@ -1034,10 +1037,11 @@ function rxAudioFrame(p) {
   if (F.on || WS.on) ft8Collect(first, s);
   if (V.tab === 'ft8') ft8WfFeed(s);
   else if (V.tab === 'wspr') wsprWfFeed(s);
+  else if (V.tab === 'cw') cwFeed(s);
   if (A.node) A.node.port.postMessage({ first, s }, [s.buffer]);
 }
 // the WebUSB audio stream runs while the player or the FT8 decoder needs it
-function audioStream() { if (link) cmd(`stream audio ${A.node || F.on || WS.on || V.tab === 'ft8' || V.tab === 'wspr' ? 'on' : 'off'}`, true); }
+function audioStream() { if (link) cmd(`stream audio ${A.node || F.on || WS.on || ['ft8', 'wspr', 'cw'].includes(V.tab) ? 'on' : 'off'}`, true); }
 // Device names appear only while the page holds the microphone permission. With a one-time grant
 // (and on file:// pages) it can end when the last stream stops, so the list is taken while the
 // permission stream is still open, and the last list with names is kept (A.devs).
@@ -1193,7 +1197,7 @@ function ft8Tick() {
   }
   if (have < m.need) { $('ft8st').textContent = `slot ${hms(slot)}: only ${(have / 12000).toFixed(1)} s of audio, not decoded`; return; }
   if (!F.worker) {
-    F.worker = new Worker('ft8worker.js?v=16373b5');
+    F.worker = new Worker('ft8worker.js?v=2b9ecfc');
     F.worker.onmessage = e => ft8Result(e.data);
     F.worker.onerror = e => { F.busy = false; log('FT8 worker: ' + e.message); };
   }
@@ -1429,6 +1433,30 @@ setInterval(ft8TxTick, 100);
 const CW_MACROS = [['CQ', 'CQ CQ CQ DE {MY} {MY} K'], ['Call', '{HIS} DE {MY} {MY} K'], ['599', '{HIS} DE {MY} TU UR 599 599 BK'],
                    ['73', '{HIS} DE {MY} TU 73 E E'], ['AGN', 'AGN BK'], ['?', '?']];
 const cwClean = t => t.toUpperCase().replace(/[^A-Z0-9.,?/=+\- ]/g, '').replace(/ +/g, ' ').trim();
+// decoder (cw.js) on the 12 kS/s receive audio while the CW tab is open in CW mode; its text goes into
+// the current RX line (a new one after an own transmission or 8 s without text)
+const CWD = { dec: null, line: null, lastT: 0, info: null };
+function cwFeed(s) {
+  if (S.mode !== 'cw') return;
+  if (!CWD.dec) CWD.dec = new CW.CwMulti(cwRx);
+  const x = new Float32Array(s.length);
+  for (let i = 0; i < s.length; i++) x[i] = s[i] / 32768;
+  CWD.dec.push(x);
+  const i = CWD.dec.info();
+  $('cwrx').textContent = i.snrDb >= 13 ? `decoder: ${i.wpm} wpm, ${i.snrDb} dB, tone ${i.pitch} Hz` : `decoder: waiting for a signal (tone ${i.pitch} Hz)`;
+}
+function cwRx(t, info) {
+  const now = Date.now();
+  if (!CWD.line || now - CWD.lastT > 8000) {
+    if (t === ' ') return;
+    cwLogLine('rx', '');
+    CWD.line = $('cwlog').lastChild.lastChild;
+  }
+  CWD.lastT = now;
+  if (info.uncertain) { const u = document.createElement('span'); u.className = 'unc'; u.textContent = t; CWD.line.appendChild(u); }
+  else CWD.line.appendChild(document.createTextNode(t));
+  const el = $('cwlog'); if (el.scrollHeight - el.scrollTop - el.clientHeight < 60) el.scrollTop = el.scrollHeight;
+}
 function cwLogLine(cls, text) {
   const el = $('cwlog'), row = document.createElement('div'), t = document.createElement('span');
   t.className = 't'; t.textContent = new Date().toISOString().slice(11, 19) + ' ';
@@ -1447,6 +1475,7 @@ function cwSend(text) {
   if (S.mode !== 'cw') { log('CW: switch to CW mode first (carrier on the shown frequency)'); return; }
   cmd(`cw send ${$('cwwpm').value} ${t}`);
   cwLogLine('tx', t);
+  CWD.line = null;                        // the answer starts a new RX line
 }
 function cwShow() {
   const el = $('cwfw'), cw = S.mode === 'cw';
@@ -1462,6 +1491,13 @@ function cwShow() {
   $('cwsend').addEventListener('click', () => { cwSend($('cwtext').value); $('cwtext').value = ''; });
   $('cwtext').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); cwSend($('cwtext').value); $('cwtext').value = ''; } });
   $('cwstop').addEventListener('click', () => { if (link) cmd('cw stop'); });
+  $('cwclear').addEventListener('click', () => { $('cwlog').textContent = ''; CWD.line = null; });
+  $('cwzero').addEventListener('click', () => {
+    if (!CWD.dec || S.mode !== 'cw') return;
+    const p = CWD.dec.info().pitch;
+    tune(S.wanted + (p - 600));           // the station's carrier is p - 600 Hz from the shown frequency
+    CWD.dec.d.forEach(d => { d.pitch = 600; });
+  });
   $('cwfw').querySelector('button').addEventListener('click', () => setMode('cw'));
   $('cwwpm').value = store.get('cwwpm', '20'); $('cwhis').value = store.get('cwhis', '');
   $('cwwpm').addEventListener('change', () => store.set('cwwpm', $('cwwpm').value));
@@ -1590,7 +1626,7 @@ function wsprTick() {
       if (have < 100 * 12000) $('wsprst').textContent = `period ${hm(period)}: only ${(have / 12000).toFixed(0)} s of audio, not decoded`;
       else {
         if (!WS.worker) {
-          WS.worker = new Worker('wsprworker.js?v=16373b5');
+          WS.worker = new Worker('wsprworker.js?v=2b9ecfc');
           WS.worker.onmessage = e => wsprResult(e.data);
           WS.worker.onerror = e => { WS.busy = false; log('WSPR worker: ' + e.message); };
         }
@@ -2139,7 +2175,7 @@ function afterConnect() {
     // no reference from a calibration on this device: follow the crystal from now on (relative; the absolute
     // error is the stored crystal value at the present temperature), after the SOF measurement has 2 s of history
     else setTimeout(() => { if (link && link.kind === 'usb') cmd('xtal ref now', true); }, 3000);
-    if (A.node || F.on || WS.on || V.tab === 'ft8' || V.tab === 'wspr') cmd('stream audio on', true);
+    if (A.node || F.on || WS.on || ['ft8', 'wspr', 'cw'].includes(V.tab)) cmd('stream audio on', true);
     if (!A.ctx && store.get('listening', false)) listen();
     if (TXA.node) cmd('stream txaudio on', true);
   }

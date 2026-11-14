@@ -1,7 +1,7 @@
 # qrpico app
 
 Browser app for the qrpico QRP transceiver: spectrum, waterfall, tuning, receive and transmit audio
-over WebUSB, FT8, FT4 and WSPR. Open it at <https://nervid.github.io/qrpico-app/> in Chrome or Edge (desktop or Android)
+over WebUSB, FT8, FT4, WSPR and CW. Open it at <https://nervid.github.io/qrpico-app/> in Chrome or Edge (desktop or Android)
 and connect the board; `?demo` runs it without a board.
 
 This repository only carries the published page; it is generated from the (private) qrpico
