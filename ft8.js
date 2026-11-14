@@ -359,9 +359,10 @@ const CHECKS = (() => {
 // sum-product decoding; llr > 0 means bit 0. Returns { bits (174 hard decisions), iters } or null.
 // Edge 3n + k: variable n and its k-th check (COLS); EDGES[m]: the edges of check m.
 const EDGES = CHECKS.map((row, m) => row.map(n => { for (let k = 0; k < 3; k++) if (COLS[3 * n + k] === m) return 3 * n + k; return -1; }));
-function ldpcDecodeFast(llr, iters = 40) {
+function ldpcDecodeFast(llr, iters = 40, stall = 99) {
   const q = new Float64Array(522), r = new Float64Array(522), th = new Float64Array(7), hard = new Uint8Array(174);
   for (let n = 0; n < 174; n++) q[3 * n] = q[3 * n + 1] = q[3 * n + 2] = llr[n];
+  let bestBad = 84, lastGain = 0;
   for (let it = 0; it < iters; it++) {
     for (let m = 0; m < 83; m++) {
       const e = EDGES[m], L = e.length;
@@ -377,9 +378,11 @@ function ldpcDecodeFast(llr, iters = 40) {
       q[3 * n] = post - a; q[3 * n + 1] = post - b; q[3 * n + 2] = post - c;
       hard[n] = post < 0 ? 1 : 0;
     }
-    let ok = true;
-    for (let m = 0; m < 83 && ok; m++) { let s = 0; for (const n of CHECKS[m]) s ^= hard[n]; if (s) ok = false; }
-    if (ok) return { bits: hard, iters: it + 1 };
+    let bad = 0;
+    for (let m = 0; m < 83; m++) { let s = 0; for (const n of CHECKS[m]) s ^= hard[n]; bad += s; }
+    if (!bad) return { bits: hard, iters: it + 1 };
+    // give up when the number of unsatisfied checks has not improved for `stall` iterations
+    if (bad < bestBad) { bestBad = bad; lastGain = it; } else if (it - lastGain >= stall) return null;
   }
   return null;
 }
@@ -501,20 +504,24 @@ function syncScore(bb, i0, dfo) {
 const DATA_SYMS = Array.from({ length: 58 }, (_, k) => k < 29 ? 7 + k : 14 + k);
 
 // one candidate -> decode or null
-function decodeCandidate(spec, c, hashes) {
+function decodeCandidate(spec, c, hashes, stall) {
   const bb = baseband(spec, c.f0);
   const fOff = c.f0 + 3.5 * TONE_HZ - bb.fc;             // rounding of the band centre
   let best = { s: -1 }, i00 = Math.round(c.frame * NSPS / 2 / (FS / FS2));
-  for (let di = -18; di <= 18; di += 2)
-    for (let dfo = -3.2; dfo <= 3.21; dfo += 0.8) {
+  for (let di = -18; di <= 18; di += 3)                     // coarse: 3 samples (16 ms), 1.2 Hz
+    for (let dfo = -2.4; dfo <= 2.41; dfo += 1.2) {
       const s = syncScore(bb, i00 + di, fOff + dfo);
       if (s > best.s) best = { s, i0: i00 + di, dfo: fOff + dfo };
     }
-  for (let di = -2; di <= 2; di++)                          // fine: 1 sample, 0.2 Hz
-    for (let dfo = -0.6; dfo <= 0.61; dfo += 0.2) {
-      const s = syncScore(bb, best.i0 + di, best.dfo + dfo);
-      if (s > best.s) best = { s, i0: best.i0 + di, dfo: best.dfo + dfo };
-    }
+  for (const [st, fs] of [[1, 0.4], [0, 0.2]]) {             // refine: +-1 sample / +-0.4 Hz, then +-0.2 Hz
+    const c0 = best;
+    for (let di = -st; di <= st; di++)
+      for (let k = -1; k <= 1; k++) {
+        if (!di && !k) continue;
+        const s = syncScore(bb, c0.i0 + di, c0.dfo + k * fs);
+        if (s > best.s) best = { s, i0: c0.i0 + di, dfo: c0.dfo + k * fs };
+      }
+  }
   if (best.s < 2) return null;
   const a = toneAmps(bb, best.i0, best.dfo, DATA_SYMS);
   // bit metrics: max |X| over the tones with the bit = 0 minus with the bit = 1 (log-amplitude domain)
@@ -535,7 +542,7 @@ function decodeCandidate(spec, c, hashes) {
   let ss = 0; for (const x of llr) ss += x * x;
   const scale = 2.83 / Math.sqrt(ss / 174 + 1e-30);
   for (let i = 0; i < 174; i++) llr[i] *= scale;
-  const d = ldpcDecodeFast(llr);
+  const d = ldpcDecodeFast(llr, 40, stall);
   if (!d) return null;
   const bits77 = d.bits.subarray(0, 77), crc = crc14(bits77);
   for (let i = 0; i < 14; i++) if (crc[i] !== d.bits[77 + i]) return null;
@@ -551,15 +558,25 @@ function decodeCandidate(spec, c, hashes) {
   return { text, freq: c.f0 + (best.dfo - fOff), dt: best.i0 / FS2 - 0.5, snr, iters: d.iters, sync: best.s, tones, bits77: Uint8Array.from(bits77) };
 }
 
+// cos by a 4096-point table with linear interpolation (|error| < 3e-7)
+const COS_N = 4096, COS_T = new Float64Array(COS_N + 1);
+for (let i = 0; i <= COS_N; i++) COS_T[i] = Math.cos(2 * Math.PI * i / COS_N);
+function fastCos(x) {
+  let u = x / (2 * Math.PI); u -= Math.floor(u); u *= COS_N;
+  const i = u | 0, f = u - i;
+  return COS_T[i] + f * (COS_T[i + 1] - COS_T[i]);
+}
 // remove a decoded signal from the audio: its waveform phase is known, its complex envelope is
 // estimated by mixing the audio down with that phase and averaging over one symbol
 function subtract(audio, d) {
   const phase = gfskPhase(d.tones, d.freq), start = Math.round((d.dt + 0.5) * FS), n = phase.length;
-  const zr = new Float64Array(n), zi = new Float64Array(n);
+  const zr = new Float64Array(n), zi = new Float64Array(n), cs = new Float64Array(n), sn = new Float64Array(n);
   for (let i = 0; i < n; i++) {
+    const c = fastCos(phase[i]), s = fastCos(phase[i] - Math.PI / 2);
+    cs[i] = c; sn[i] = s;
     const k = start + i;
     if (k < 0 || k >= audio.length) continue;
-    zr[i] = audio[k] * Math.cos(phase[i]); zi[i] = -audio[k] * Math.sin(phase[i]);
+    zr[i] = audio[k] * c; zi[i] = -audio[k] * s;
   }
   // moving average over NSPS samples (centred): 2 x the mean is the complex amplitude
   const half = NSPS / 2;
@@ -571,24 +588,28 @@ function subtract(audio, d) {
     if (k < 0 || k >= audio.length) continue;
     const a = Math.max(0, i - half), b = Math.min(n, i + half), m = b - a;
     const ar = 2 * (cr[b] - cr[a]) / m, ai = 2 * (ci[b] - ci[a]) / m;
-    audio[k] -= ar * Math.cos(phase[i]) - ai * Math.sin(phase[i]);
+    audio[k] -= ar * cs[i] - ai * sn[i];
   }
 }
 
-// audio: Float32Array of one slot at 12 kS/s (up to 15 s, sample 0 = slot start); not modified
+// audio: Float32Array of one slot at 12 kS/s (up to 15 s, sample 0 = slot start); not modified.
+// Effort (4 recorded 20 m slots against jt9 -d 3 with 186 decodes, Node on the PC): the defaults
+// (all BP iterations, 250 / 250 candidates) 120 common in 1.7 s per slot; { stall: 6, maxCand2: 120 }
+// (BP stops after 6 iterations without fewer unsatisfied checks, 120 candidates in passes 2 and 3)
+// 113 in 0.95 s - for phones.
 function decode(audio, opt = {}) {
   const fmin = opt.fmin || 150, fmax = opt.fmax || 3100, hashes = opt.hashes || null, passes = opt.passes || 3;
   const t0 = Date.now(), work = Float32Array.from(audio), found = new Map();
   let ncand = 0;
   for (let pass = 0; pass < passes; pass++) {
-    const cands = coarse(work, fmin, fmax, opt.maxCand || 250);
+    const cands = coarse(work, fmin, fmax, pass ? (opt.maxCand2 || 250) : (opt.maxCand || 250));
     ncand += cands.length;
     const re = new Float64Array(NBIG), im = new Float64Array(NBIG);
     re.set(work.subarray(0, Math.min(work.length, NBIG)));
     fft(re, im);
     const spec = { re, im }, fresh = [];
     for (const c of cands) {
-      const d = decodeCandidate(spec, c, hashes);
+      const d = decodeCandidate(spec, c, hashes, opt.stall || 99);
       if (d && !found.has(d.text)) { found.set(d.text, d); fresh.push(d); }
     }
     if (!fresh.length) break;

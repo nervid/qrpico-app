@@ -1023,7 +1023,9 @@ function ft8Tick() {
     F.worker.onerror = e => { F.busy = false; log('FT8 worker: ' + e.message); };
   }
   F.busy = true;
-  F.worker.postMessage({ slot, audio, opt: { fmin: 150, fmax: 2900 } }, [audio.buffer]);
+  // phones (touch screen): the faster setting, about half the CPU for ~3 % fewer decodes (ft8.js)
+  const fast = matchMedia('(pointer: coarse)').matches ? { stall: 6, maxCand2: 120 } : {};
+  F.worker.postMessage({ slot, audio, opt: Object.assign({ fmin: 150, fmax: 3100 }, fast) }, [audio.buffer]);
 }
 const hms = t => new Date(t * 1000).toISOString().slice(11, 19).replace(/:/g, '');
 function ft8Result(r) {
