@@ -206,6 +206,7 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
       <div class="row" style="margin-top:6px"><span class="note" style="margin:0">at board</span><div class="meter tx"><div id="blevel"></div></div></div>
       <button id="ptt" class="ptt" style="margin-top:8px" aria-pressed="false">PTT (hold, or Space)</button>
       <div class="row" style="margin-top:6px"><label class="inline"><input id="latch" type="checkbox"> latching</label><button id="tunebtn" class="stepbtn" title="1 kHz tone at -10 dB while held">Tune</button><label class="inline"><input id="txloop" type="checkbox"> txmon loop</label></div>
+      <div class="row" style="margin-top:6px"><label class="inline" title="Lift the PEP limit the board sets for a weak USB supply (default USB, e.g. a phone: about 0.4 W)"><input id="txovr" type="checkbox"> USB supply override</label></div>
       <p class="note" id="txnote">Mic on, then hold PTT: the microphone goes to the board (WebUSB stream, or its USB audio output if one is chosen) only while PTT is on.</p>
     </div>
     <details class="panel" id="p-status">
@@ -289,7 +290,7 @@ function parseStatus(p) {
            ...(p.length >= 116 ? { txPeak: f32(80), txRms: f32(84), txRing: u32(88), txOver: u32(92), txUnder: u32(96),
              txUsbUnder: u32(100), txStreaming: !!(p[104] & 1), txLoop: !!(p[104] & 2), txState: p[105], txReason: p[106],
              pttSrc: p[107], txElapsed: u32(108), txTimeout: v.getUint16(112, true), dryRun: !!p[114] } : {}),
-           ...(p.length >= 132 ? { txApp: !!(p[104] & 4), levelCap: p[115] ? p[115] / 100 : 1, appLevel: u32(116), appUnder: u32(120), appOver: u32(124),
+           ...(p.length >= 132 ? { txApp: !!(p[104] & 4), supplyOverride: !!(p[104] & 8), levelCap: p[115] ? p[115] / 100 : 1, appLevel: u32(116), appUnder: u32(120), appOver: u32(124),
              appSamples: u32(128) } : {}) };
 }
 const txStates = ['RX', 'TX prep', 'TX', 'TX end'];
@@ -570,8 +571,9 @@ function updateTxStatus(s) {
   if (s.dryRun !== S.dryRun) {
     S.dryRun = s.dryRun;
     $('txpwrv').title = s.dryRun ? 'This firmware build runs TX as a dry run: nothing is transmitted.' :
-      (s.levelCap < 1 ? `The board's USB supply allows at most ${pwrText(s.levelCap)} (default USB about 1 W, 1.5 A about 4.5 W; console 'tx supply override on' lifts it)` : '');
+      (s.levelCap < 1 ? `The board's USB supply allows at most ${pwrText(s.levelCap)} (default USB about 0.4 W, 1.5 A about 4.5 W; console 'tx supply override on' lifts it)` : '');
     showPwr();
+    if (s.supplyOverride !== undefined) $('txovr').checked = s.supplyOverride;
     if (s.dryRun) log('TX: this firmware build runs PTT as a dry run (no RF).');
   }
 }
@@ -1172,6 +1174,15 @@ async function setPtt(on, fromBoard = false) {
   $('mic').addEventListener('change', () => { if (TXA.ctx) { micOff(); micOn(); } });
   ['mgain', 'mcomp'].forEach(id => $(id).addEventListener('input', applyMic));
   $('txloop').addEventListener('change', () => cmd(`txmon ${$('txloop').checked ? 'loop' : 'off'}`));
+  // the board reports the state in STATUS (bit 3 of byte 104); until a reset, not stored
+  $('txovr').addEventListener('change', () => {
+    const on = $('txovr').checked;
+    if (on && !confirm('Lift the USB supply limit? A phone or a default USB port may not deliver the current of a higher PEP ' +
+        '(about 1 A at 1 W carrier): the supply can sag or the source can switch off. The board still guards the PA.')) {
+      $('txovr').checked = false; return;
+    }
+    cmd(`tx supply override ${on ? 'on' : 'off'}`);
+  });
 })();
 
 // ---------------------------------------------------------------- interaction
