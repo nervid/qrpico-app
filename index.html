@@ -355,10 +355,10 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
   <button id="mmute">Mute</button>
   <button id="mptt" class="ptt" aria-pressed="false">PTT</button>
 </div>
-<script src="ft8.js?v=686cfdd"></script>
-<script src="ft4.js?v=686cfdd"></script>
-<script src="wspr.js?v=686cfdd"></script>
-<script src="cw.js?v=686cfdd"></script>
+<script src="ft8.js?v=87f93b0"></script>
+<script src="ft4.js?v=87f93b0"></script>
+<script src="wspr.js?v=87f93b0"></script>
+<script src="cw.js?v=87f93b0"></script>
 <script>
 'use strict';
 // ---------------------------------------------------------------- protocol (docs/usb-protocol.md)
@@ -724,6 +724,10 @@ function onFrame(type, flags, p) {
     if (/^ptt on: /.test(t) && !/^ptt on: ok/.test(t) && TXA.ptt) setPtt(false, true);   // refused by the board
     const st = t.match(/^station: call (\S+) grid (\S+) power ([\d.]+) ft8hz (\d+)(?: xtal ([+-]?[\d.]+))?(?: at ([-\d.]+) C)?/m);
     if (st) stationApply(st[1], st[2], Number(st[3]), Number(st[4]), st[5], st[6]);
+    if (st && /\(calibration: defaults/.test(t)) {
+      log('Board: no stored calibration found, the defaults are in use (station data, crystal and PA_TEMP must be set again; console: cal)');
+      const el = $('xtalmsg'); el.hidden = false; el.textContent = 'The board has no stored calibration: set call, grid and power again and measure the crystal.';
+    }
     // the host's SOF reference of the crystal calibration: kept per device (each host has its own USB clock)
     const xr = t.match(/^xtal ref: ([+-][\d.]+) ppm/m);
     if (xr && S.xtalCal) { store.set('xtalref', Number(xr[1])); S.xtalCal = false; }
@@ -1222,7 +1226,7 @@ function ft8Tick() {
   }
   if (have < m.need) { $('ft8st').textContent = `slot ${hms(slot)}: only ${(have / 12000).toFixed(1)} s of audio, not decoded`; return; }
   if (!F.worker) {
-    F.worker = new Worker('ft8worker.js?v=686cfdd');
+    F.worker = new Worker('ft8worker.js?v=87f93b0');
     F.worker.onmessage = e => ft8Result(e.data);
     F.worker.onerror = e => { F.busy = false; log('FT8 worker: ' + e.message); };
   }
@@ -1807,7 +1811,7 @@ function wsprTick() {
       if (have < 100 * 12000) $('wsprst').textContent = `period ${hm(period)}: only ${(have / 12000).toFixed(0)} s of audio, not decoded`;
       else {
         if (!WS.worker) {
-          WS.worker = new Worker('wsprworker.js?v=686cfdd');
+          WS.worker = new Worker('wsprworker.js?v=87f93b0');
           WS.worker.onmessage = e => wsprResult(e.data);
           WS.worker.onerror = e => { WS.busy = false; log('WSPR worker: ' + e.message); };
         }
