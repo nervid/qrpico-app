@@ -353,10 +353,10 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
   <button id="mmute">Mute</button>
   <button id="mptt" class="ptt" aria-pressed="false">PTT</button>
 </div>
-<script src="ft8.js?v=c472055"></script>
-<script src="ft4.js?v=c472055"></script>
-<script src="wspr.js?v=c472055"></script>
-<script src="cw.js?v=c472055"></script>
+<script src="ft8.js?v=d02db6d"></script>
+<script src="ft4.js?v=d02db6d"></script>
+<script src="wspr.js?v=d02db6d"></script>
+<script src="cw.js?v=d02db6d"></script>
 <script>
 'use strict';
 // ---------------------------------------------------------------- protocol (docs/usb-protocol.md)
@@ -1219,7 +1219,7 @@ function ft8Tick() {
   }
   if (have < m.need) { $('ft8st').textContent = `slot ${hms(slot)}: only ${(have / 12000).toFixed(1)} s of audio, not decoded`; return; }
   if (!F.worker) {
-    F.worker = new Worker('ft8worker.js?v=c472055');
+    F.worker = new Worker('ft8worker.js?v=d02db6d');
     F.worker.onmessage = e => ft8Result(e.data);
     F.worker.onerror = e => { F.busy = false; log('FT8 worker: ' + e.message); };
   }
@@ -1309,37 +1309,46 @@ function stationApply(call, grid, power, ft8hz, xtal, xtalTemp) {
 }
 // Crystal against this computer's clock: every STATUS frame carries the board's microsecond counter (25 MHz
 // crystal); its arrival time on the host is the board time plus a delay of at least a few hundred us. The
-// latest arrival of each 2 s (the shortest delay) per window, a line through them: slope = crystal error.
+// latest arrival of each 5 s (the shortest delay) per window, a line through them: slope = crystal error.
 // The host clock is the NTP-synchronised system clock (performance.now, cross-checked against Date.now).
 // Applying it ('station xtal') stores the absolute value in the board's flash and the host's SOF reference
 // in this browser: from then on the board follows the crystal's temperature through SOF.
-const XM = { on: false, t0: 0, pts: [], win: null, res: null };
+const XM = { on: false, pts: [], ptsD: [], win: null, res: null };
 function xtalSample(host, hostDate) {
   if (!XM.on || !S.status || S.status.boardUs === undefined) return;
-  const b = S.status.boardUs, h = host * 1000;          // microseconds
-  if (!XM.b0) { XM.b0 = b; XM.h0 = h; XM.d0 = hostDate; }
-  const t = (h - XM.h0) / 1e6, off = (b - XM.b0) - (h - XM.h0), w = Math.floor(t / 2);
-  if (!XM.win || XM.win.w !== w) { if (XM.win) XM.pts.push([XM.win.t, XM.win.off]); XM.win = { w, t, off }; }
-  else if (off > XM.win.off) { XM.win.t = t; XM.win.off = off; }
-  XM.dateOff = (b - XM.b0) / 1000 - (hostDate - XM.d0);  // ms, for the Date.now cross-check
+  const b = S.status.boardUs, h = host * 1000, d = hostDate * 1000;   // microseconds
+  if (!XM.b0) { XM.b0 = b; XM.h0 = h; XM.d0 = d; }
+  const t = (h - XM.h0) / 1e6, w = Math.floor(t / 5);
+  const off = (b - XM.b0) - (h - XM.h0), offD = (b - XM.b0) - (d - XM.d0);
+  if (!XM.win || XM.win.w !== w) {
+    if (XM.win) { XM.pts.push([XM.win.t, XM.win.off]); XM.ptsD.push([XM.win.t, XM.win.offD]); }
+    XM.win = { w, t, off, offD };
+  } else { if (off > XM.win.off) { XM.win.t = t; XM.win.off = off; } if (offD > XM.win.offD) XM.win.offD = offD; }
   XM.tLast = t;
   xtalFit();
 }
-function xtalFit() {
-  const p = XM.pts, n = p.length;
-  if (n < 5) { xtalMsg(`measuring ${Math.round(XM.tLast || 0)} s ...`); return; }
+// least-squares line through [t s, offset us]: slope (ppm) and its standard error
+function lineFit(p) {
+  const n = p.length;
   let st = 0, so = 0; for (const [t, o] of p) { st += t; so += o; }
   const mt = st / n, mo = so / n; let stt = 0, sto = 0;
   for (const [t, o] of p) { stt += (t - mt) ** 2; sto += (t - mt) * (o - mo); }
-  const k = sto / stt;                                   // us per s = ppm
-  let r2 = 0; for (const [t, o] of p) r2 += (o - mo - k * (t - mt)) ** 2;
-  const se = Math.sqrt(r2 / Math.max(1, n - 2) / stt);
-  const kDate = XM.dateOff * 1000 / (XM.tLast * 1e6) * 1e6;   // the same over Date.now (1 ms steps)
-  XM.res = { ppm: k, se, kDate };
-  const done = XM.tLast >= 60 && se < 0.5;
-  xtalMsg(`${done ? 'result' : `measuring ${Math.round(XM.tLast)} s`}: crystal ${k >= 0 ? '+' : ''}${k.toFixed(2)} ppm ± ${se.toFixed(2)}` +
-    (XM.tLast > 30 && Math.abs(kDate - k) > 3 ? ' (system clocks disagree: is the clock NTP-synchronised?)' : ''), done);
-  if (done || XM.tLast > 180) XM.on = false;
+  const k = sto / stt; let r2 = 0;
+  for (const [t, o] of p) r2 += (o - mo - k * (t - mt)) ** 2;
+  return { k, se: Math.sqrt(r2 / Math.max(1, n - 2) / stt) };
+}
+function xtalFit() {
+  if (XM.pts.length < 5) { xtalMsg(`measuring ${Math.round(XM.tLast || 0)} s ...`); return; }
+  const a = lineFit(XM.pts), dt = lineFit(XM.ptsD);       // performance.now and Date.now (1 ms steps)
+  XM.res = { ppm: a.k, se: a.se, kDate: dt.k };
+  // done at 60 s with +-0.5 ppm, else it goes on; after 3 min it ends, Apply offered up to +-1.5 ppm
+  const done = (XM.tLast >= 60 && a.se < 0.5) || XM.tLast >= 180;
+  // the two host clocks must agree within their uncertainties (else the clock is stepped or not NTP-disciplined)
+  const disagree = XM.tLast >= 40 && Math.abs(dt.k - a.k) > Math.max(2, 4 * Math.hypot(a.se, dt.se));
+  xtalMsg(`${done ? 'result' : `measuring ${Math.round(XM.tLast)} s`}: crystal ${a.k >= 0 ? '+' : ''}${a.k.toFixed(2)} ppm ± ${a.se.toFixed(2)}` +
+    (disagree ? ` (system clocks disagree: ${dt.k >= 0 ? '+' : ''}${dt.k.toFixed(1)} ppm over Date.now; is the clock NTP-synchronised?)` : '') +
+    (done && a.se >= 1.5 ? ' - too uncertain (USB timing very irregular), not offered' : ''), done && !disagree && a.se < 1.5);
+  if (done) XM.on = false;
 }
 function xtalMsg(text, offer = false) {
   const el = $('xtalmsg'); el.hidden = false; el.textContent = text + ' ';
@@ -1356,7 +1365,7 @@ function xtalMeasure() {
   if (!link) { log('crystal: connect the board first'); return; }
   if (!S.status || S.status.boardUs === undefined) { log('crystal: the board firmware has no time stamp in STATUS (update it)'); return; }
   if (S.status.txState) { log('crystal: not while transmitting'); return; }
-  Object.assign(XM, { on: true, pts: [], win: null, b0: 0, res: null, tLast: 0 });
+  Object.assign(XM, { on: true, pts: [], ptsD: [], win: null, b0: 0, res: null, tLast: 0 });
   xtalMsg(matchMedia('(pointer: coarse)').matches ? 'measuring ... (on a phone the clock rate may be uncertain: better measure on a PC with NTP)' : 'measuring ...');
 }
 function stationSet(key, value) {
@@ -1795,7 +1804,7 @@ function wsprTick() {
       if (have < 100 * 12000) $('wsprst').textContent = `period ${hm(period)}: only ${(have / 12000).toFixed(0)} s of audio, not decoded`;
       else {
         if (!WS.worker) {
-          WS.worker = new Worker('wsprworker.js?v=c472055');
+          WS.worker = new Worker('wsprworker.js?v=d02db6d');
           WS.worker.onmessage = e => wsprResult(e.data);
           WS.worker.onerror = e => { WS.busy = false; log('WSPR worker: ' + e.message); };
         }
