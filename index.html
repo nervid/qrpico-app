@@ -89,6 +89,11 @@ label.inline { display: flex; gap: 6px; align-items: center; color: var(--muted)
 .wsprrow { display: grid; grid-template-columns: 3.4em 2.6em 3.2em 6.3em 2.4em minmax(0, 1fr) 3.6em 2.6em 4.2em; gap: 0 6px; padding: 2px 0; }
 .wsprrow.slot { border-top: 1px solid var(--line); margin-top: 2px; }
 #v-wspr .ft8list { max-height: none; flex: 1; min-height: 200px; }
+.cwlog { font: 14px var(--mono); flex: 1; min-height: 160px; max-height: 50vh; overflow-y: auto; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.cwlog .tx { color: var(--warn); }
+.cwlog .t { color: var(--muted); font-size: 11px; }
+.cwsend input { flex: 1; min-width: 0; font: 14px var(--mono); text-transform: uppercase; }
+.cwmacros { flex-wrap: wrap; }
 #wsprwf { cursor: crosshair; touch-action: pan-y; }
 #wsprwf, #wsprwfo { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 #wsprwfo { pointer-events: none; }
@@ -200,13 +205,14 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
     </div>
     <p id="helptext" class="note" hidden>
       Click / tap spectrum or waterfall: tune there · drag sideways: move the band under the finger (by the step) · − / + (hold: repeat) · Wheel / <kbd>←</kbd> <kbd>→</kbd>: one step (Shift ×10) · <kbd>↑</kbd> <kbd>↓</kbd>: 1 kHz ·
-      <kbd>Space</kbd>: PTT · <kbd>U</kbd> / <kbd>L</kbd>: USB / LSB · <kbd>M</kbd>: mute · <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd>: 40 / 20 / 10 m.
+      <kbd>Space</kbd>: PTT · <kbd>U</kbd> / <kbd>L</kbd> / <kbd>C</kbd>: USB / LSB / CW · <kbd>M</kbd>: mute · <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd>: 40 / 20 / 10 m.
       Frequency field: 14.074 (MHz), 14074 (kHz) or 14074000 (Hz).
     </p>
     <div class="tabs seg" role="tablist" aria-label="View">
       <button role="tab" data-tab="spec" aria-selected="true">Spectrum</button>
       <button role="tab" data-tab="ft8" aria-selected="false">FT8 / FT4</button>
       <button role="tab" data-tab="wspr" aria-selected="false">WSPR</button>
+      <button role="tab" data-tab="cw" aria-selected="false">CW</button>
     </div>
     <div id="v-spec" class="tabview">
     <div class="canvases">
@@ -227,6 +233,17 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
         <select id="wftick" aria-label="Time marks"><option value="10">marks 10 s</option><option value="15">marks 15 s (FT8)</option><option value="0">no marks</option></select></span>
       <label class="inline"><input id="hidelo" type="checkbox" checked> interpolate the f_LO bin</label>
     </div>
+    </div>
+    <div id="v-cw" class="tabview" hidden>
+      <div class="freqwarn" id="cwfw" role="status" hidden><span></span><button type="button">CW mode</button></div>
+      <div class="cwlog" id="cwlog" role="log" aria-label="CW transcript"></div>
+      <div class="row cwsend"><input id="cwtext" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="text to send, Enter" aria-label="CW text to send"><button id="cwsend">Send</button><button id="cwstop">Stop</button></div>
+      <div class="row cwmacros" id="cwmacros"></div>
+      <div class="field">
+        <span>his call</span><input id="cwhis" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="e.g. OE1XYZ" aria-label="Call of the other station">
+        <span>speed</span><select id="cwwpm" aria-label="CW speed"><option>12</option><option>15</option><option>18</option><option selected>20</option><option>22</option><option>25</option><option>28</option><option>30</option></select>
+      </div>
+      <p class="note" id="cwst">Sends Morse on the shown frequency (CW mode: you hear stations at 600 Hz when they are on it). The board keys itself and stops 0.6 s after the text; text typed while it sends is appended. Your call: FT8 tab / station data.</p>
     </div>
     <div id="v-wspr" class="tabview" hidden>
       <div class="ft8wfbox">
@@ -316,9 +333,9 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
   <button id="mmute">Mute</button>
   <button id="mptt" class="ptt" aria-pressed="false">PTT</button>
 </div>
-<script src="ft8.js?v=8644b01"></script>
-<script src="ft4.js?v=8644b01"></script>
-<script src="wspr.js?v=8644b01"></script>
+<script src="ft8.js?v=16373b5"></script>
+<script src="ft4.js?v=16373b5"></script>
+<script src="wspr.js?v=16373b5"></script>
 <script>
 'use strict';
 // ---------------------------------------------------------------- protocol (docs/usb-protocol.md)
@@ -695,6 +712,7 @@ function updateStatus() {
   const s = S.status;
   S.wanted = s.wanted;
   digiWarn();
+  if (V.tab === 'cw') cwShow();
   if (document.activeElement !== $('freq')) $('freq').value = fmtHz(s.wanted);
   $('st-lo').textContent = `LO ${fmtHz(s.fLo)} MHz, offset ${(s.offset / 1000).toFixed(3)} kHz`;
   const load = s.blkAvg / 2731 * 100;
@@ -1175,7 +1193,7 @@ function ft8Tick() {
   }
   if (have < m.need) { $('ft8st').textContent = `slot ${hms(slot)}: only ${(have / 12000).toFixed(1)} s of audio, not decoded`; return; }
   if (!F.worker) {
-    F.worker = new Worker('ft8worker.js?v=8644b01');
+    F.worker = new Worker('ft8worker.js?v=16373b5');
     F.worker.onmessage = e => ft8Result(e.data);
     F.worker.onerror = e => { F.busy = false; log('FT8 worker: ' + e.message); };
   }
@@ -1405,13 +1423,58 @@ function ft8Halt() {
 }
 setInterval(ft8TxTick, 100);
 
+// ---------------------------------------------------------------- CW: text and macros to the board's Morse keyer
+// ('cw send <wpm> <text>': the board keys itself, appends while it sends, ends 0.6 s after the text).
+// The transcript shows what was sent (later also the decoder's text).
+const CW_MACROS = [['CQ', 'CQ CQ CQ DE {MY} {MY} K'], ['Call', '{HIS} DE {MY} {MY} K'], ['599', '{HIS} DE {MY} TU UR 599 599 BK'],
+                   ['73', '{HIS} DE {MY} TU 73 E E'], ['AGN', 'AGN BK'], ['?', '?']];
+const cwClean = t => t.toUpperCase().replace(/[^A-Z0-9.,?/=+\- ]/g, '').replace(/ +/g, ' ').trim();
+function cwLogLine(cls, text) {
+  const el = $('cwlog'), row = document.createElement('div'), t = document.createElement('span');
+  t.className = 't'; t.textContent = new Date().toISOString().slice(11, 19) + ' ';
+  const x = document.createElement('span'); x.className = cls; x.textContent = text;
+  row.append(t, x); el.appendChild(row);
+  while (el.children.length > 500) el.removeChild(el.firstChild);
+  el.scrollTop = el.scrollHeight;
+}
+function cwSend(text) {
+  const my = $('ft8call').value.trim().toUpperCase(), his = $('cwhis').value.trim().toUpperCase();
+  if (/\{MY\}/.test(text) && !my) { log('CW: enter your call (FT8 tab / station data)'); return; }
+  if (/\{HIS\}/.test(text) && !his) { log('CW: enter his call'); $('cwhis').focus(); return; }
+  const t = cwClean(text.replace(/\{MY\}/g, my).replace(/\{HIS\}/g, his));
+  if (!t) return;
+  if (!link) { log('not connected'); return; }
+  if (S.mode !== 'cw') { log('CW: switch to CW mode first (carrier on the shown frequency)'); return; }
+  cmd(`cw send ${$('cwwpm').value} ${t}`);
+  cwLogLine('tx', t);
+}
+function cwShow() {
+  const el = $('cwfw'), cw = S.mode === 'cw';
+  el.hidden = cw;
+  if (!cw) el.firstChild.textContent = 'Not in CW mode: switch to send and to hear stations at 600 Hz.';
+}
+(() => {
+  const box = $('cwmacros');
+  CW_MACROS.forEach(([label, text]) => {
+    const b = document.createElement('button'); b.textContent = label; b.title = text;
+    b.addEventListener('click', () => cwSend(text)); box.appendChild(b);
+  });
+  $('cwsend').addEventListener('click', () => { cwSend($('cwtext').value); $('cwtext').value = ''; });
+  $('cwtext').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); cwSend($('cwtext').value); $('cwtext').value = ''; } });
+  $('cwstop').addEventListener('click', () => { if (link) cmd('cw stop'); });
+  $('cwfw').querySelector('button').addEventListener('click', () => setMode('cw'));
+  $('cwwpm').value = store.get('cwwpm', '20'); $('cwhis').value = store.get('cwhis', '');
+  $('cwwpm').addEventListener('change', () => store.set('cwwpm', $('cwwpm').value));
+  $('cwhis').addEventListener('change', () => store.set('cwhis', $('cwhis').value.trim().toUpperCase()));
+})();
+
 // ---- view tabs: Spectrum (the wide RF view) and FT8 (audio waterfall, decodes, TX)
 function setTab(tab) {
   V.tab = tab; store.set('tab', tab);
   document.querySelectorAll('[data-tab]').forEach(b => b.setAttribute('aria-selected', String(b.dataset.tab === tab)));
-  $('v-spec').hidden = tab !== 'spec'; $('v-ft8').hidden = tab !== 'ft8'; $('v-wspr').hidden = tab !== 'wspr';
+  $('v-spec').hidden = tab !== 'spec'; $('v-ft8').hidden = tab !== 'ft8'; $('v-wspr').hidden = tab !== 'wspr'; $('v-cw').hidden = tab !== 'cw';
   audioStream();
-  if (tab === 'spec') { S.fLoWf = null; drawSpectrum(); drawWfOverlay(); } else if (tab === 'ft8') ft8WfOverlay(); else wsprWfOverlay();
+  if (tab === 'spec') { S.fLoWf = null; drawSpectrum(); drawWfOverlay(); } else if (tab === 'ft8') ft8WfOverlay(); else if (tab === 'wspr') wsprWfOverlay(); else cwShow();
 }
 document.querySelectorAll('[data-tab]').forEach(b => b.addEventListener('click', () => setTab(b.dataset.tab)));
 
@@ -1527,7 +1590,7 @@ function wsprTick() {
       if (have < 100 * 12000) $('wsprst').textContent = `period ${hm(period)}: only ${(have / 12000).toFixed(0)} s of audio, not decoded`;
       else {
         if (!WS.worker) {
-          WS.worker = new Worker('wsprworker.js?v=8644b01');
+          WS.worker = new Worker('wsprworker.js?v=16373b5');
           WS.worker.onmessage = e => wsprResult(e.data);
           WS.worker.onerror = e => { WS.busy = false; log('WSPR worker: ' + e.message); };
         }
