@@ -181,8 +181,13 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
       <div class="group seg" role="group" aria-label="Mode">
         <button data-mode="usb">USB</button>
         <button data-mode="lsb">LSB</button>
+        <button data-mode="cw" title="CW: a carrier on the tuned frequency is heard at 600 Hz">CW</button>
         <button data-mode="iq">I/Q</button>
       </div>
+      <select id="filter" aria-label="Audio filter" title="Audio filter bandwidth" style="width:auto">
+        <option value="0">2.8 kHz</option><option value="1">2.4 kHz</option><option value="2">1.8 kHz</option>
+        <option value="3">500 Hz</option><option value="4">250 Hz</option>
+      </select>
       <div class="group">
         <button id="rxbtn" title="Start or stop the RX chain">RX start</button>
         <select id="source" aria-label="Signal source" style="width:auto">
@@ -311,9 +316,9 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
   <button id="mmute">Mute</button>
   <button id="mptt" class="ptt" aria-pressed="false">PTT</button>
 </div>
-<script src="ft8.js?v=67876dc"></script>
-<script src="ft4.js?v=67876dc"></script>
-<script src="wspr.js?v=67876dc"></script>
+<script src="ft8.js?v=8644b01"></script>
+<script src="ft4.js?v=8644b01"></script>
+<script src="wspr.js?v=8644b01"></script>
 <script>
 'use strict';
 // ---------------------------------------------------------------- protocol (docs/usb-protocol.md)
@@ -409,7 +414,8 @@ function parseStatus(p) {
              txUsbUnder: u32(100), txStreaming: !!(p[104] & 1), txLoop: !!(p[104] & 2), txState: p[105], txReason: p[106],
              pttSrc: p[107], txElapsed: u32(108), txTimeout: v.getUint16(112, true), dryRun: !!p[114] } : {}),
            ...(p.length >= 132 ? { txApp: !!(p[104] & 4), supplyOverride: !!(p[104] & 8), levelCap: p[115] ? p[115] / 100 : 1, appLevel: u32(116), appUnder: u32(120), appOver: u32(124),
-             appSamples: u32(128) } : {}) };
+             appSamples: u32(128) } : {}),
+           ...(p.length >= 136 ? { filter: p[132], pitch: v.getUint16(134, true) } : {}) };
 }
 const txStates = ['RX', 'TX prep', 'TX', 'TX end'];
 const txReasons = ['none', 'released', 'keepalive lost', 'time-out', 'outside band', 'mode not USB/LSB',
@@ -545,7 +551,7 @@ function startDemo() {
     }
     parser.push(encodeFrame(T_SPECTRUM, u8));
     if (st.seq % 5 === 0) {
-      const s = new Uint8Array(116), w = new DataView(s.buffer);
+      const s = new Uint8Array(136), w = new DataView(s.buffer);
       w.setBigInt64(0, BigInt(st.wanted), true); w.setBigInt64(8, BigInt(Math.round(fLo * 1000)), true);
       w.setBigInt64(16, BigInt(Math.round((st.wanted - fLo) * 1000)), true);
       s.set([st.mode, st.source, st.running, st.wanted < 8e6 ? 3 : st.wanted < 20e6 ? 2 : 1, 1, 0, 0, 0], 24);
@@ -555,6 +561,7 @@ function startDemo() {
       w.setFloat32(80, TXA.levelDb + 3, true); w.setFloat32(84, TXA.levelDb, true);
       s[104] = (TXA.ctx ? 1 : 0) | (st.loop ? 2 : 0); s[105] = st.tx; s[106] = st.reason; s[107] = st.src;
       w.setUint32(108, st.tx ? Math.round(performance.now() - st.txT0) : 0, true); w.setUint16(112, st.timeout, true); s[114] = 1;
+      s[132] = st.filter || 0; w.setUint16(134, 600, true);
       parser.push(encodeFrame(T_STATUS, s));
     }
   }
@@ -619,7 +626,11 @@ function startDemo() {
         out = `tuned ${f} Hz: LO ${lo.f.toFixed(3)} Hz, NCO offset ${(f - lo.f >= 0 ? '+' : '') + (f - lo.f).toFixed(3)} Hz` +
               (changed ? ' (PLL changed, audio muted 26 ms)' : ' (same PLL, NCO only)') + ` [REFDIV ${lo.r} FBDIV ${lo.fb} POSTDIV ${lo.p1}/${lo.p2} n ${lo.n}]\n`;
       }
-    } else if (a[0] === 'mode') { st.mode = { iq: 0, usb: 1, lsb: 2 }[a[1]] ?? st.mode; out = `mode ${a[1]}\n`; }
+    } else if (a[0] === 'mode') {
+      const m = { iq: 0, usb: 1, lsb: 2, cw: 3 }[a[1]] ?? st.mode;
+      if (m === 3 && (st.filter || 0) < 3) st.filter = 3; else if (m !== 3 && st.mode === 3) st.filter = 0;
+      st.mode = m; out = `mode ${a[1]}\n`;
+    } else if (a[0] === 'filter') { const f = FILTERS.findIndex(x => x.name === a[1]); if (f >= 0) st.filter = f; out = `filter ${a[1]}\n`; }
     else if (a[0] === 'rx' && a[1] === 'start') { st.running = 1; st.source = a[2] === 'test' ? 1 : 0; out = `RX chain running, source ${a[2] === 'test' ? 'test' : 'PCM1808 (demo)'}\n`; }
     else if (a[0] === 'rx' && a[1] === 'stop') { st.running = 0; out = 'RX chain stopped\n'; }
     else if (a[0] === 'rx' && a[1] === 'test') { st.t1 = [Number(a[2]) - st.wanted, Number(a[3])]; if (a[4]) st.t2 = [Number(a[4]) - st.wanted, Number(a[5])]; out = 'test source set\n'; }
@@ -653,7 +664,7 @@ function startDemo() {
 // ---------------------------------------------------------------- UI state and rendering
 const $ = id => document.getElementById(id);
 const S = { spec: null, status: null, wanted: 14074000, mode: 'usb', fLoWf: null, txActive: false };
-const modeNames = ['iq', 'usb', 'lsb'], bandNames = ['–', '10 m', '20 m', '40 m'];
+const modeNames = ['iq', 'usb', 'lsb', 'cw'], bandNames = ['–', '10 m', '20 m', '40 m'];
 // settings kept in this browser (localStorage may be unavailable: then nothing is remembered)
 const store = {
   get(k, d) { try { const v = localStorage.getItem('qrpico-' + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
@@ -700,6 +711,7 @@ function updateStatus() {
   ];
   $('status').tBodies[0].innerHTML = rows.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('');
   S.mode = modeNames[s.mode] || 'usb';
+  if (s.filter !== undefined && document.activeElement !== $('filter') && $('filter').value !== String(s.filter)) $('filter').value = String(s.filter);
   document.querySelectorAll('[data-mode]').forEach(b => b.classList.toggle('active', b.dataset.mode === S.mode));
   document.querySelectorAll('[data-band]').forEach(b => b.classList.toggle('active', Number(b.dataset.band) === s.band));
   $('rxbtn').textContent = s.running ? 'RX stop' : 'RX start';
@@ -751,10 +763,16 @@ function displayDb(sp) {
   if ($('hidelo').checked) d[c] = 0.5 * (d[c - 1] + d[c + 1]);
   return d;
 }
+// audio filters (firmware dsp.h): width and centre in the audio; centre null: the CW pitch
+const FILTERS = [{ w: 2800, c: 1500, name: '2.8k' }, { w: 2400, c: 1500, name: '2.4k' }, { w: 1800, c: 1200, name: '1.8k' },
+                 { w: 500, c: null, name: '500' }, { w: 250, c: null, name: '250' }];
+const curFilter = () => (S.status && S.status.filter !== undefined ? S.status.filter : S.filter) || 0;
 function passband(sp) {
-  const w = S.wanted, m = S.status ? S.status.mode : modeNames.indexOf(S.mode);
-  if (m === 1) return [w + 100, w + 2900];
-  if (m === 2) return [w - 2900, w - 100];
+  const w = S.wanted, m = S.status ? S.status.mode : modeNames.indexOf(S.mode), f = FILTERS[curFilter()] || FILTERS[0];
+  const c = f.c === null ? ((S.status && S.status.pitch) || 600) : f.c;
+  if (m === 1) return [w + c - f.w / 2, w + c + f.w / 2];
+  if (m === 2) return [w - c - f.w / 2, w - c + f.w / 2];
+  if (m === 3) return [w - f.w / 2, w + f.w / 2];        // CW: around the carrier
   return [w - 20000, w + 20000];
 }
 
@@ -1157,7 +1175,7 @@ function ft8Tick() {
   }
   if (have < m.need) { $('ft8st').textContent = `slot ${hms(slot)}: only ${(have / 12000).toFixed(1)} s of audio, not decoded`; return; }
   if (!F.worker) {
-    F.worker = new Worker('ft8worker.js?v=67876dc');
+    F.worker = new Worker('ft8worker.js?v=8644b01');
     F.worker.onmessage = e => ft8Result(e.data);
     F.worker.onerror = e => { F.busy = false; log('FT8 worker: ' + e.message); };
   }
@@ -1220,7 +1238,7 @@ function ft8SetMode(mode) {
 }
 $('ft8mode').addEventListener('change', () => ft8SetMode($('ft8mode').value));
 ft8LogCount();
-['ft8fw', 'wsprfw'].forEach(id => $(id).querySelector('button').addEventListener('click', () => { tune(Number($(id).dataset.f)); setMode('usb'); }));
+['ft8fw', 'wsprfw'].forEach(id => $(id).querySelector('button').addEventListener('click', () => { tune(Number($(id).dataset.f)); setMode('usb'); setFilter(0); }));
 $('ft8clear').addEventListener('click', () => { $('ft8list').textContent = ''; F.marks = []; drawWfOverlay(); });
 setInterval(ft8Tick, 250);
 
@@ -1347,6 +1365,7 @@ function digiWarn() {
     if (!want) t = `Not in a band with a ${name} frequency (${Object.keys(tab).join(', ')}).`;
     else if (Math.abs(S.wanted - want) > 10) t = `Not on the usual ${name} frequency of ${b[2]}: dial ${fmtHz(want)} MHz (${S.wanted > want ? '+' : ''}${((S.wanted - want) / 1000).toFixed(1)} kHz now).`;
     else if (!usb) t = `${name} needs USB.`;
+    else if (curFilter() !== 0) t = `${name} needs the 2.8 kHz filter (signals up to 3 kHz audio).`;
     el.hidden = !t;
     el.classList.toggle('tx', !!t && tx);
     const sp = el.firstChild; if (sp.textContent !== t) sp.textContent = t;
@@ -1508,7 +1527,7 @@ function wsprTick() {
       if (have < 100 * 12000) $('wsprst').textContent = `period ${hm(period)}: only ${(have / 12000).toFixed(0)} s of audio, not decoded`;
       else {
         if (!WS.worker) {
-          WS.worker = new Worker('wsprworker.js?v=67876dc');
+          WS.worker = new Worker('wsprworker.js?v=8644b01');
           WS.worker.onmessage = e => wsprResult(e.data);
           WS.worker.onerror = e => { WS.busy = false; log('WSPR worker: ' + e.message); };
         }
@@ -1933,8 +1952,21 @@ function tune(f) {
   store.set('freq', f);
 }
 const step = () => Number($('step').value);
-function setMode(m) { S.mode = m; cmd(`mode ${m}`); drawSpectrum(); drawWfOverlay(); store.set('mode', m);
-  document.querySelectorAll('[data-mode]').forEach(b => b.classList.toggle('active', b.dataset.mode === m)); }
+// the filter is remembered per mode group (SSB: 2.8 / 2.4 / 1.8 kHz, CW: 500 / 250 Hz); the board itself
+// switches CW to a CW filter and back to 2.8 kHz when leaving CW
+const filterKey = m => m === 'cw' ? 'filter-cw' : 'filter-ssb';
+function setMode(m) {
+  S.mode = m; cmd(`mode ${m}`); store.set('mode', m);
+  if (m !== 'iq') setFilter(store.get(filterKey(m), m === 'cw' ? 3 : 0), false);
+  drawSpectrum(); drawWfOverlay();
+  document.querySelectorAll('[data-mode]').forEach(b => b.classList.toggle('active', b.dataset.mode === m));
+}
+function setFilter(f, remember = true) {
+  f = Number(f) || 0; S.filter = f; $('filter').value = String(f);
+  cmd(`filter ${FILTERS[f].name}`, true);
+  if (remember) store.set(filterKey(S.mode), f);
+  drawSpectrum(); drawWfOverlay(); digiWarn();
+}
 // - / + : one step; held (touch or mouse): repeats after 0.4 s, 12 steps per second
 for (const [id, dir] of [['fdown', -1], ['fup', 1]]) {
   const b = $(id); let t1 = 0, t2 = 0;
@@ -1999,6 +2031,7 @@ document.querySelectorAll('[data-f]').forEach(b => b.addEventListener('click', (
   tune(bandFor(f) === n ? f : Number(b.dataset.f));   // ignore a stored value from another band
 }));
 document.querySelectorAll('[data-mode]').forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
+$('filter').addEventListener('change', () => setFilter($('filter').value));
 // remember the last frequency per band, so that a band button returns there
 // (by the frequency itself: STATUS still reports the old band right after a band change)
 setInterval(() => { const n = bandFor(S.wanted); if (n) store.set('band-' + n, S.wanted); }, 2000);
@@ -2071,6 +2104,7 @@ window.addEventListener('keydown', e => {
   else if (e.key === 'ArrowDown') tune(S.wanted - 1000);
   else if (e.key === 'u' || e.key === 'U') setMode('usb');
   else if (e.key === 'l' || e.key === 'L') setMode('lsb');
+  else if (e.key === 'c' || e.key === 'C') setMode('cw');
   else if (e.key === 'm' || e.key === 'M') { $('amute').checked = !$('amute').checked; applyAudio(); $('amute').dispatchEvent(new Event('input')); }
   else if (['1', '2', '3'].includes(e.key)) document.querySelector(`[data-band="${4 - Number(e.key)}"]`).click();
   else return;
@@ -2088,6 +2122,7 @@ const persist = (id, prop = 'value') => {
 $('step').value = store.get('step', '100');
 $('txpwr').value = store.get('txpwr', '0.30'); showPwr();
 S.mode = store.get('mode', 'usb');
+S.filter = store.get(filterKey(S.mode), S.mode === 'cw' ? 3 : 0); $('filter').value = String(S.filter);
 document.querySelectorAll('[data-mode]').forEach(b => b.classList.toggle('active', b.dataset.mode === S.mode));
 { const t = store.get('theme', null); if (t) document.documentElement.dataset.theme = t; }
 ['dbmin', 'dbmax', 'hidelo'].forEach(id => $(id).addEventListener('input', drawSpectrum));
