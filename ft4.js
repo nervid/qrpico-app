@@ -268,10 +268,15 @@ function decodeCandidate(spec, c, hashes, stall) {
     }
   }
   let d = null;
+  let m4 = null;
   for (const L of [1, 2, 4]) {
-    d = FT8.ldpcDecode(bitMetrics(all, L), 40, stall);
+    const m = bitMetrics(all, L);
+    d = FT8.ldpcDecode(m, 40, stall);
     if (d) break;
+    if (L === 2) m4 = m;
   }
+  // belief propagation failed on all three: OSD on the 2-symbol metrics (CRC-14 below is its check)
+  if (!d && best.s >= 2) { const o = FT8.osdDecode(m4, 32); if (o) d = { bits: o.bits, iters: 0 }; }
   if (!d) return null;
   const rx77 = d.bits.subarray(0, 77), crc = FT8.crc14(rx77);
   for (let i = 0; i < 14; i++) if (crc[i] !== d.bits[77 + i]) return null;

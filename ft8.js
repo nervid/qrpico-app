@@ -387,8 +387,60 @@ function ldpcDecodeFast(llr, iters = 40, stall = 99) {
   return null;
 }
 
+// ---- ordered-statistics decoding (OSD) when belief propagation fails: the 91 most reliable independent
+// positions decide the codeword (Gaussian elimination of the generator matrix in reliability order); then
+// variants with one, and for the least reliable of them two, flipped bits; the codeword closest to the
+// soft values (sum of |llr| over disagreeing bits) wins. Returns 174 bits or null.
+const GROWS = (() => {                   // generator row j (174 bits, 6 words): e_j | column j of the parity rows
+  const rows = [];
+  for (let j = 0; j < 91; j++) {
+    const r = new Uint32Array(6);
+    r[j >> 5] |= 1 << (j & 31);
+    for (let i = 0; i < 83; i++) if (genBits[i][j]) { const p = 91 + i; r[p >> 5] |= 1 << (p & 31); }
+    rows.push(r);
+  }
+  return rows;
+})();
+function osdDecode(llr, depth2 = 16) {
+  const perm = Array.from({ length: 174 }, (_, i) => i).sort((a, b) => Math.abs(llr[b]) - Math.abs(llr[a]));
+  // matrix in permuted column order: M[j] bit c = generator row j at position perm[c]
+  const M = GROWS.map(r => { const m = new Uint32Array(6); for (let c = 0; c < 174; c++) { const p = perm[c]; if ((r[p >> 5] >>> (p & 31)) & 1) m[c >> 5] |= 1 << (c & 31); } return m; });
+  const piv = [];                         // pivot column per row
+  let row = 0;
+  for (let c = 0; c < 174 && row < 91; c++) {
+    const w = c >> 5, b = 1 << (c & 31);
+    let r = row; while (r < 91 && !(M[r][w] & b)) r++;
+    if (r === 91) continue;
+    [M[row], M[r]] = [M[r], M[row]];
+    for (let k = 0; k < 91; k++) if (k !== row && (M[k][w] & b)) for (let x = 0; x < 6; x++) M[k][x] ^= M[row][x];
+    piv.push(c); row++;
+  }
+  if (row < 91) return null;
+  // hard decisions and weights in permuted order
+  const hard = new Uint32Array(6), wgt = new Float64Array(174);
+  for (let c = 0; c < 174; c++) { const v = llr[perm[c]]; wgt[c] = Math.abs(v); if (v < 0) hard[c >> 5] |= 1 << (c & 31); }
+  const cw = new Uint32Array(6);
+  for (let k = 0; k < 91; k++) { const c = piv[k]; if ((hard[c >> 5] >>> (c & 31)) & 1) for (let x = 0; x < 6; x++) cw[x] ^= M[k][x]; }
+  const dist = v => { let d = 0; for (let x = 0; x < 6; x++) { let z = v[x] ^ hard[x]; while (z) { const t = 31 - Math.clz32(z); d += wgt[x * 32 + t]; z ^= 1 << t; } } return d; };
+  let best = Uint32Array.from(cw), bd = dist(cw);
+  const t = new Uint32Array(6);
+  for (let k = 0; k < 91; k++) {                       // order 1
+    for (let x = 0; x < 6; x++) t[x] = cw[x] ^ M[k][x];
+    const d = dist(t); if (d < bd) { bd = d; best = Uint32Array.from(t); }
+  }
+  for (let a = 91 - depth2; a < 91; a++) for (let b = a + 1; b < 91; b++) {   // order 2 among the least reliable pivots
+    for (let x = 0; x < 6; x++) t[x] = cw[x] ^ M[a][x] ^ M[b][x];
+    const d = dist(t); if (d < bd) { bd = d; best = Uint32Array.from(t); }
+  }
+  const out = new Uint8Array(174);
+  for (let c = 0; c < 174; c++) out[perm[c]] = (best[c >> 5] >>> (c & 31)) & 1;
+  return { bits: out, dist: bd };
+}
+
 let LLR_MODE = 1;                       // 0: bit metrics normalised over the codeword only, 1: also per symbol (real band: +2 decodes in 186)
 const FS2 = 187.5, SPS2 = 30;           // baseband rate after the narrow-band step, samples per symbol
+const OSD_SYNC = 3.5, OSD_DEPTH2 = 32;    // OSD from this sync score (a false decode in noise had 2.4, real ones >= 4);
+                                          // order 2 among the 32 least reliable pivots
 const NBIG = 262144, NSMALL = 4096;     // whole-slot FFT (21.8 s), baseband IFFT (= NBIG x 187.5 / 12000)
 
 // 1. coarse candidates: [{ f0, frame, score }] (f0 = tone 0 in Hz, frame = start in half symbols)
@@ -503,6 +555,20 @@ function syncScore(bb, i0, dfo) {
 }
 const DATA_SYMS = Array.from({ length: 58 }, (_, k) => k < 29 ? 7 + k : 14 + k);
 
+// SNR in 2500 Hz from the slot's FFT (Parseval): noise = the 30th percentile of the bins within -300 ...
+// +350 Hz (a crowded band still has gaps), signal = the band's power above that
+function snrFromSpectrum(spec, f0) {
+  const df = FS / NBIG, k0 = Math.max(1, Math.round((f0 - 300) / df)), k1 = Math.min(NBIG / 2 - 1, Math.round((f0 + 350) / df));
+  const s0 = Math.round((f0 - 3) / df), s1 = Math.round((f0 + 53) / df), pw = [];
+  let sb = 0;
+  for (let k = k0; k <= k1; k++) { const p = spec.re[k] ** 2 + spec.im[k] ** 2; pw.push(p); if (k >= s0 && k <= s1) sb += p; }
+  pw.sort((a, b) => a - b);
+  const noise = pw[Math.floor(pw.length * 0.3)] / 0.3567;    // mean of exponential bins from the 30th percentile
+  if (!(noise > 0)) return null;
+  const nb = s1 - s0 + 1, ms = NSYM * NSPS, ns = spec.len;
+  const psig = Math.max(1e-12, sb - noise * nb) * 2 / (NBIG * ms), sigma2 = noise / ns;
+  return Math.max(-28, Math.round(10 * Math.log10(psig / (sigma2 * 2500 / (FS / 2)))));
+}
 // one candidate -> decode or null
 function decodeCandidate(spec, c, hashes, stall) {
   const bb = baseband(spec, c.f0);
@@ -542,7 +608,13 @@ function decodeCandidate(spec, c, hashes, stall) {
   let ss = 0; for (const x of llr) ss += x * x;
   const scale = 2.83 / Math.sqrt(ss / 174 + 1e-30);
   for (let i = 0; i < 174; i++) llr[i] *= scale;
-  const d = ldpcDecodeFast(llr, 40, stall);
+  let d = ldpcDecodeFast(llr, 40, stall);
+  // BP failed: OSD for candidates with a usable sync (on the real band +14 % decodes for +8 % time, no
+  // false decodes in 40 noise slots; the CRC-14 below is its check)
+  if (!d && best.s >= OSD_SYNC) {
+    const o = osdDecode(llr, OSD_DEPTH2);
+    if (o) d = { bits: o.bits, iters: 0 };
+  }
   if (!d) return null;
   const bits77 = d.bits.subarray(0, 77), crc = crc14(bits77);
   for (let i = 0; i < 14; i++) if (crc[i] !== d.bits[77 + i]) return null;
@@ -554,7 +626,12 @@ function decodeCandidate(spec, c, hashes, stall) {
   let ps = 0, pn = 0;
   DATA_SYMS.forEach((sym, si) => { for (let k = 0; k < 8; k++) { const p = a[si * 16 + 2 * k] ** 2 + a[si * 16 + 2 * k + 1] ** 2; if (k === tones[sym]) ps += p; else pn += p; } });
   ps /= 58; pn /= 58 * 7;
-  const snr = Math.max(-28, Math.round(10 * Math.log10(Math.max(1e-6, ps - pn) / (pn * 2500 / TONE_HZ))));
+  // the other tones of each symbol give the noise for weak signals (their leakage caps strong ones near
+  // 0 dB); the spectrum is right for strong ones (neighbours' skirts raise its noise for weak ones): both
+  // err low, so the larger of the two
+  const st = Math.max(-28, Math.round(10 * Math.log10(Math.max(1e-6, ps - pn) / (pn * 2500 / TONE_HZ))));
+  const sp = snrFromSpectrum(spec, c.f0 + (best.dfo - fOff));
+  const snr = sp !== null ? Math.max(sp, st) : st;
   return { text, freq: c.f0 + (best.dfo - fOff), dt: best.i0 / FS2 - 0.5, snr, iters: d.iters, sync: best.s, tones, bits77: Uint8Array.from(bits77) };
 }
 
@@ -607,7 +684,7 @@ function decode(audio, opt = {}) {
     const re = new Float64Array(NBIG), im = new Float64Array(NBIG);
     re.set(work.subarray(0, Math.min(work.length, NBIG)));
     fft(re, im);
-    const spec = { re, im }, fresh = [];
+    const spec = { re, im, len: Math.min(work.length, NBIG) }, fresh = [];
     for (const c of cands) {
       const d = decodeCandidate(spec, c, hashes, opt.stall || 99);
       if (d && !found.has(d.text)) { found.set(d.text, d); fresh.push(d); }
@@ -621,7 +698,7 @@ function decode(audio, opt = {}) {
 }
 
 const FT8 = { pack77, unpack77, crc14, encode174, symbols, synth, encode, hashCall, HashBook, stdCall6,
-              decode, ldpcDecode: ldpcDecodeFast, fft, setLlrMode: m => { LLR_MODE = m; },
+              decode, ldpcDecode: ldpcDecodeFast, osdDecode, fft, setLlrMode: m => { LLR_MODE = m; },
               COSTAS, GRAY, COLS, GEN_BITS: genBits, NSYM, FS, NSPS, TONE_HZ };
 if (typeof module !== 'undefined' && module.exports) module.exports = FT8; else root.FT8 = FT8;
 })(typeof self !== 'undefined' ? self : this);

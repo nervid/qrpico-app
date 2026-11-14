@@ -355,10 +355,10 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
   <button id="mmute">Mute</button>
   <button id="mptt" class="ptt" aria-pressed="false">PTT</button>
 </div>
-<script src="ft8.js?v=f6d86b9"></script>
-<script src="ft4.js?v=f6d86b9"></script>
-<script src="wspr.js?v=f6d86b9"></script>
-<script src="cw.js?v=f6d86b9"></script>
+<script src="ft8.js?v=686cfdd"></script>
+<script src="ft4.js?v=686cfdd"></script>
+<script src="wspr.js?v=686cfdd"></script>
+<script src="cw.js?v=686cfdd"></script>
 <script>
 'use strict';
 // ---------------------------------------------------------------- protocol (docs/usb-protocol.md)
@@ -1222,7 +1222,7 @@ function ft8Tick() {
   }
   if (have < m.need) { $('ft8st').textContent = `slot ${hms(slot)}: only ${(have / 12000).toFixed(1)} s of audio, not decoded`; return; }
   if (!F.worker) {
-    F.worker = new Worker('ft8worker.js?v=f6d86b9');
+    F.worker = new Worker('ft8worker.js?v=686cfdd');
     F.worker.onmessage = e => ft8Result(e.data);
     F.worker.onerror = e => { F.busy = false; log('FT8 worker: ' + e.message); };
   }
@@ -1807,7 +1807,7 @@ function wsprTick() {
       if (have < 100 * 12000) $('wsprst').textContent = `period ${hm(period)}: only ${(have / 12000).toFixed(0)} s of audio, not decoded`;
       else {
         if (!WS.worker) {
-          WS.worker = new Worker('wsprworker.js?v=f6d86b9');
+          WS.worker = new Worker('wsprworker.js?v=686cfdd');
           WS.worker.onmessage = e => wsprResult(e.data);
           WS.worker.onerror = e => { WS.busy = false; log('WSPR worker: ' + e.message); };
         }
