@@ -77,6 +77,12 @@ label.inline { display: flex; gap: 6px; align-items: center; color: var(--muted)
 .ft8row.cq > span:last-child { color: var(--ok); font-weight: 600; }
 .ft8row.slot { border-top: 1px solid var(--line); margin-top: 2px; }
 .ft8row.head { color: var(--muted); }
+.ft8row { cursor: pointer; border-radius: 4px; }
+.ft8row:hover { background: color-mix(in srgb, var(--line) 50%, transparent); }
+.ft8row.me > span:last-child { color: var(--warn); font-weight: 700; }
+.ft8row.mine > span:last-child { color: var(--muted); font-style: italic; }
+#ft8txmsg.tx { color: var(--warn); font-weight: 600; }
+#ft8en.active { background: #c62828; border-color: #c62828; color: #fff; }
 /* touch screens: larger targets (about 44 px), larger frequency, the PTT button taller */
 @media (pointer: coarse) {
   .ft8row { padding: 6px 0; }
@@ -205,6 +211,13 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
       <h2>FT8</h2>
       <div class="row"><button id="ft8on">Decode FT8</button><button id="ft8clear">Clear</button></div>
       <p class="note" id="ft8st">Decodes every 15 s slot from the board's receive audio (USB, e.g. 14.074 MHz). Needs the PC / phone clock within about ±1 s (NTP).</p>
+      <div class="field" style="margin-top:6px">
+        <span>my call</span><input id="ft8call" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="e.g. OE3XYZ" aria-label="My call sign">
+        <span>my grid</span><input id="ft8grid" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="e.g. JN88" maxlength="4" aria-label="My 4-character locator">
+        <span>TX audio</span><div class="row"><input id="ft8txf" type="number" min="200" max="2900" step="1" value="1500" aria-label="TX audio frequency in Hz" style="width:7em"><span class="unit">Hz</span></div>
+      </div>
+      <div class="row" style="margin-top:6px"><button id="ft8en" title="Master switch: transmissions only while this is on">Enable TX</button><button id="ft8cq">CQ</button><button id="ft8halt">Halt</button></div>
+      <p class="note" id="ft8txmsg">Tap / click a decode to answer that station; the QSO then runs by itself (report, RR73, 73).</p>
       <div class="ft8list" id="ft8list" role="log" aria-label="FT8 decodes"></div>
     </div>
     <div class="panel">
@@ -1038,7 +1051,11 @@ function ft8Result(r) {
   const frag = document.createDocumentFragment();
   r.decodes.forEach((d, i) => {
     const row = document.createElement('div');
-    row.className = 'ft8row' + (i === 0 ? ' slot' : '') + (/^CQ /.test(d.text) ? ' cq' : '');
+    const mine = Q.my && d.text.split(' ')[0] === Q.my;
+    row.className = 'ft8row' + (i === 0 ? ' slot' : '') + (/^CQ /.test(d.text) ? ' cq' : '') + (mine ? ' me' : '');
+    row.setAttribute('role', 'button'); row.tabIndex = 0;
+    row.addEventListener('click', () => ft8Answer(d, r.slot));
+    row.addEventListener('keydown', e => { if (e.key === 'Enter') ft8Answer(d, r.slot); });
     [hms(r.slot), String(d.snr), d.dt.toFixed(1), String(Math.round(d.freq)), d.text]
       .forEach(t => { const c = document.createElement('span'); c.textContent = t; row.appendChild(c); });
     frag.appendChild(row);
@@ -1053,6 +1070,7 @@ function ft8Result(r) {
     return { rf: dial + (usb ? 1 : -1) * (d.freq + 22), label: who, cq: w[0] === 'CQ' };
   });
   drawWfOverlay();
+  ft8Sequence(r);
 }
 function ft8Set(on) {
   F.on = on; store.set('ft8', on);
@@ -1064,6 +1082,117 @@ function ft8Set(on) {
 $('ft8on').addEventListener('click', () => ft8Set(!F.on));
 $('ft8clear').addEventListener('click', () => { $('ft8list').textContent = ''; F.marks = []; drawWfOverlay(); });
 setInterval(ft8Tick, 250);
+
+// ---- FT8 TX: one QSO at a time, WSJT-X style sequence; the board makes the waveform (ft8 load + PTT)
+const Q = { my: '', grid: '', en: false, his: null, hisGrid: '', step: '', msg: '', parity: 0, tries: 0,
+            sentRpt: '', rcvdRpt: '', logged: false, txSlot: 0, txing: false, ka: 0, end: 0 };
+const slotParity = t => Math.floor(t / 15) % 2;           // 0: :00 / :30, 1: :15 / :45
+const rptText = snr => { const v = Math.max(-30, Math.min(49, Math.round(snr))); return (v < 0 ? '-' : '+') + String(Math.abs(v)).padStart(2, '0'); };
+const isGrid = w => /^[A-R]{2}[0-9]{2}$/.test(w) && w !== 'RR73';
+function ft8Settings() {
+  Q.my = $('ft8call').value.trim().toUpperCase(); Q.grid = $('ft8grid').value.trim().toUpperCase();
+  store.set('ft8call', Q.my); store.set('ft8grid', Q.grid); store.set('ft8txf', $('ft8txf').value);
+}
+function ft8Show() {
+  const el = $('ft8txmsg');
+  el.classList.toggle('tx', Q.txing);
+  $('ft8en').classList.toggle('active', Q.en); $('ft8en').textContent = Q.en ? 'TX enabled' : 'Enable TX';
+  if (Q.txing) el.textContent = `TX now: ${Q.msg}`;
+  else if (Q.en && Q.msg) el.textContent = `next TX (${Q.parity ? ':15 / :45' : ':00 / :30'}): ${Q.msg}` + (Q.tries ? ` - try ${Q.tries + 1}` : '');
+  else if (Q.msg) el.textContent = `ready: ${Q.msg} (Enable TX to send)`;
+}
+function ft8Check() {
+  ft8Settings();
+  if (!FT8.stdCall6(Q.my)) { log('FT8: enter your call sign (standard call, e.g. OE3XYZ)'); return false; }
+  if (!isGrid(Q.grid)) { log('FT8: enter your 4-character locator (e.g. JN88)'); return false; }
+  return true;
+}
+function ft8SetMsg(msg, step) {
+  if (!FT8.encode(msg)) { log(`FT8: cannot encode "${msg}"`); return false; }
+  if (msg !== Q.msg) Q.tries = 0;
+  Q.msg = msg; Q.step = step; ft8Show(); return true;
+}
+// CQ in the coming slot
+function ft8Cq() {
+  if (!ft8Check()) return;
+  Object.assign(Q, { his: null, hisGrid: '', sentRpt: '', rcvdRpt: '', logged: false, parity: slotParity(Date.now() / 1000 + 15) });
+  ft8SetMsg(`CQ ${Q.my} ${Q.grid}`, 'cq');
+}
+// answer the station of a decode (row tap), in the other slot parity
+function ft8Answer(d, slot) {
+  if (!ft8Check()) return;
+  const w = d.text.split(' ');
+  if (w[0] === Q.my && w[1]) { Q.his = w[1]; Q.parity = 1 - slotParity(slot); ft8Reply(d); return; }
+  const his = w[0] === 'CQ' ? w[w.length - (isGrid(w[w.length - 1]) ? 2 : 1)] : w[1];
+  if (!his || his.startsWith('<')) { log('FT8: no call to answer in "' + d.text + '"'); return; }
+  Object.assign(Q, { his, hisGrid: w[0] === 'CQ' && isGrid(w[w.length - 1]) ? w[w.length - 1] : '', sentRpt: '', rcvdRpt: '', logged: false,
+                     parity: 1 - slotParity(slot) });
+  ft8SetMsg(`${his} ${Q.my} ${Q.grid}`, 'grid');
+}
+// the next message after a decode addressed to me from the station of this QSO
+function ft8Reply(d) {
+  const w = d.text.split(' '), x = w.slice(2).join(' ');
+  if (isGrid(x) || x === '') { Q.hisGrid = x || Q.hisGrid; Q.sentRpt = rptText(d.snr); ft8SetMsg(`${Q.his} ${Q.my} ${Q.sentRpt}`, 'rpt'); }
+  else if (/^[+-][0-9]{2}$/.test(x)) { Q.rcvdRpt = x; Q.sentRpt = rptText(d.snr); ft8SetMsg(`${Q.his} ${Q.my} R${Q.sentRpt}`, 'rrpt'); }
+  else if (/^R[+-][0-9]{2}$/.test(x)) { Q.rcvdRpt = x.slice(1); ft8SetMsg(`${Q.his} ${Q.my} RR73`, 'rr73'); ft8Log(); }
+  else if (x === 'RR73' || x === 'RRR') { ft8SetMsg(`${Q.his} ${Q.my} 73`, '73'); ft8Log(); }
+  else if (x === '73') { ft8Log(); Q.en = false; Q.msg = ''; log(`FT8: QSO with ${Q.his} complete`); ft8Show(); }
+}
+function ft8Sequence(r) {
+  if (!Q.my) return;
+  for (const d of r.decodes) {
+    const w = d.text.split(' ');
+    if (w[0] !== Q.my || !w[1]) continue;
+    if (Q.step === 'cq' && !Q.his) { Q.his = w[1]; Q.parity = 1 - slotParity(r.slot); }   // someone answers my CQ
+    if (w[1] === Q.his) { ft8Reply(d); break; }
+  }
+}
+function ft8Log() {
+  if (Q.logged || !Q.his) return;
+  Q.logged = true;
+  const qsos = store.get('ft8log', []);
+  qsos.push({ t: new Date().toISOString(), call: Q.his, grid: Q.hisGrid, sent: Q.sentRpt, rcvd: Q.rcvdRpt, f: S.wanted, mode: 'FT8' });
+  store.set('ft8log', qsos);
+  log(`FT8: logged ${Q.his} ${Q.hisGrid} sent ${Q.sentRpt} rcvd ${Q.rcvdRpt} (${qsos.length} QSOs in the log)`);
+}
+// transmit in our slot: load the symbols and key the board ~0.4 s after the slot start (the waveform then
+// starts near +0.5 s); waits for the previous slot's decode up to +2 s (slow phones), then skips the slot
+function ft8TxTick() {
+  const now = Date.now() / 1000, slot = Math.floor(now / 15) * 15, into = now - slot;
+  if (Q.txing) {
+    if (!S.status || now > Q.end || (S.status.txState === 0 && now - Q.txSlot > 2)) ft8TxEnd();
+    return;
+  }
+  if (!Q.en || !Q.msg || !link || slotParity(slot) !== Q.parity || Q.txSlot === slot || into < 0.4 || into > 2.0) return;
+  if (F.busy) return;                                     // the previous slot may still change the message
+  if (TXA.ptt) return;                                     // voice PTT in use
+  if (Q.tries >= (Q.step === 'cq' ? 10 : Q.step === '73' ? 1 : 6)) { Q.en = false; log('FT8: no answer, TX stopped'); ft8Show(); return; }
+  const e = FT8.encode(Q.msg), f = Math.max(200, Math.min(2900, Number($('ft8txf').value) || 1500));
+  Q.txSlot = slot; Q.tries++; Q.txing = true; Q.end = slot + 14.2;
+  cmd(`ft8 load ${f} ${Array.from(e.tones).join('')}`, true);
+  cmd('ptt on');
+  Q.ka = setInterval(() => cmd('ptt ka', true), 250);
+  ft8Show();
+}
+function ft8TxEnd() {
+  clearInterval(Q.ka); Q.ka = 0;
+  if (S.status && S.status.txState) cmd('ptt off', true);
+  Q.txing = false;
+  if (Q.step === '73') { Q.en = false; Q.msg = ''; }
+  ft8Show();
+}
+function ft8Halt() {
+  Q.en = false;
+  if (Q.txing) { cmd('ptt off'); ft8TxEnd(); }
+  ft8Show();
+}
+setInterval(ft8TxTick, 100);
+$('ft8en').addEventListener('click', () => { if (!Q.en && !ft8Check()) return; Q.en = !Q.en; if (!Q.en) ft8Halt(); ft8Show(); });
+$('ft8cq').addEventListener('click', () => { ft8Cq(); });
+$('ft8halt').addEventListener('click', ft8Halt);
+['ft8call', 'ft8grid', 'ft8txf'].forEach(id => $(id).addEventListener('change', ft8Settings));
+$('ft8call').value = store.get('ft8call', ''); $('ft8grid').value = store.get('ft8grid', ''); $('ft8txf').value = store.get('ft8txf', '1500');
+ft8Settings();
 
 // ---------------------------------------------------------------- TX: microphone -> WebUSB stream (default) or "qrpico TX" USB audio output
 const TXA = { ctx: null, stream: null, comp: null, dry: null, gain: null, gate: null, toneGain: null, an: null,
