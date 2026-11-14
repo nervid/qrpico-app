@@ -312,6 +312,33 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
 // ---------------------------------------------------------------- protocol (docs/usb-protocol.md)
 // view tab ('spec' or 'ft8') and the FT8 audio waterfall state
 // WSPR state (section "WSPR")
+// 250-ms clock from a worker: a background tab runs page timers at most once a second (the board drops app
+// PTT after 1 s without 'ptt ka', 5 s during an FT8 / WSPR transmission); a worker's timers are not throttled that way
+const every250 = (() => {
+  const subs = new Set();
+  let w = null;
+  try {
+    w = new Worker(URL.createObjectURL(new Blob(['setInterval(() => postMessage(0), 250)'], { type: 'text/javascript' })));
+    w.onmessage = () => subs.forEach(f => f());
+  } catch (e) { w = null; }
+  return f => { if (!w) { const id = setInterval(f, 250); return () => clearInterval(id); } subs.add(f); return () => subs.delete(f); };
+})();
+const stop250 = s => { if (s) s(); return 0; };
+// screen wake lock while a TX mode is enabled: a phone with the screen off stops the page and its keepalive
+const WAKE = { lock: null, busy: false };
+async function wakeUpdate() {
+  if (WAKE.busy || !('wakeLock' in navigator)) return;
+  const want = WS.en || Q.en;
+  WAKE.busy = true;
+  try {
+    if (want && !WAKE.lock && document.visibilityState === 'visible') {
+      WAKE.lock = await navigator.wakeLock.request('screen');
+      WAKE.lock.addEventListener('release', () => { WAKE.lock = null; });
+    } else if (!want && WAKE.lock) { await WAKE.lock.release(); WAKE.lock = null; }
+  } catch (e) { WAKE.lock = null; }
+  WAKE.busy = false;
+}
+document.addEventListener('visibilitychange', wakeUpdate);   // the lock is released when the page is hidden
 const WS = { on: false, worker: null, busy: false, lastPeriod: 0, en: false, txPeriod: 0, txing: false, ka: 0, end: 0, buf: new Float32Array(16384), n: 0, lo: -100, spots: [] };
 const V = { tab: 'spec', buf: new Float32Array(4096), n: 0, lo: -100, hi: -60, lastSlot: 0 };
 // FT8 decoder state (section "FT8 decoding"); here because the waterfall overlay reads F.marks
@@ -638,7 +665,7 @@ function onFrame(type, flags, p) {
     if (st) stationApply(st[1], st[2], Number(st[3]), Number(st[4]), st[5]);
     // the host's SOF reference of the crystal calibration: kept per device (each host has its own USB clock)
     const xr = t.match(/^xtal ref: ([+-][\d.]+) ppm/m);
-    if (xr) store.set('xtalref', Number(xr[1]));
+    if (xr && S.xtalCal) { store.set('xtalref', Number(xr[1])); S.xtalCal = false; }
   }
   else if (type === T_SPECTRUM) { S.spec = parseSpectrum(p); if (!S.status) S.wanted = S.spec.wanted; drawSpectrum(); pushWaterfall(); }
   else if (type === T_STATUS) { S.status = parseStatus(p); updateStatus(); txRate(); }
@@ -1187,11 +1214,14 @@ function stationApply(call, grid, power, ft8hz, xtal) {
   $('txpwr').value = String(power); store.set('txpwr', String(power)); showPwr();
   ft8Settings(); ft8WfOverlay();
 }
-function stationSet(key, value) { if (link && link.kind === 'usb') cmd(`station ${key} ${value === '' ? '-' : value}`); }
+function stationSet(key, value) {
+  if (link && link.kind === 'usb') { if (key === 'xtal') S.xtalCal = true; cmd(`station ${key} ${value === '' ? '-' : value}`); }
+}
 function ft8Show() {
   const el = $('ft8txmsg');
   el.classList.toggle('tx', Q.txing);
   $('ft8en').classList.toggle('active', Q.en); $('ft8en').textContent = Q.en ? 'TX enabled' : 'Enable TX';
+  wakeUpdate();
   if (Q.txing) el.textContent = `TX now: ${Q.msg}`;
   else if (Q.en && Q.msg) el.textContent = `next TX (${Q.parity ? ':15 / :45' : ':00 / :30'}): ${Q.msg}` + (Q.tries ? ` - try ${Q.tries + 1}` : '');
   else if (Q.msg) el.textContent = `ready: ${Q.msg} (Enable TX to send)`;
@@ -1266,11 +1296,11 @@ function ft8TxTick() {
   Q.txSlot = slot; Q.tries++; Q.txing = true; Q.end = slot + 14.2;
   cmd(`ft8 load ${f} ${Array.from(e.tones).join('')}`, true);
   cmd('ptt on');
-  Q.ka = setInterval(() => cmd('ptt ka', true), 250);
+  Q.ka = every250(() => cmd('ptt ka', true));
   ft8Show();
 }
 function ft8TxEnd() {
-  clearInterval(Q.ka); Q.ka = 0;
+  Q.ka = stop250(Q.ka);
   if (S.status && S.status.txState) cmd('ptt off', true);
   Q.txing = false;
   if (Q.step === '73') { Q.en = false; Q.msg = ''; }
@@ -1455,16 +1485,17 @@ function wsprTxTick(now, period, into) {
   WS.txPeriod = period; WS.txing = true; WS.end = period + 114; WS.msg = `${call} ${grid} ${dbm}`;
   cmd(`wspr load ${f.toFixed(2)} ${Array.from(e.symbols).join('')}`, true);
   cmd('ptt on');
-  WS.ka = setInterval(() => cmd('ptt ka', true), 250);
+  WS.ka = every250(() => cmd('ptt ka', true));
   wsprShow();
 }
 function wsprTxEnd() {
-  clearInterval(WS.ka); WS.ka = 0;
+  WS.ka = stop250(WS.ka);
   if (S.status && S.status.txState) cmd('ptt off', true);
   WS.txing = false; wsprShow();
 }
 function wsprShow() {
   $('wspren').classList.toggle('active', WS.en); $('wspren').textContent = WS.en ? 'TX enabled' : 'Enable TX';
+  wakeUpdate();
   const el = $('wsprtxmsg');
   el.classList.toggle('tx', WS.txing);
   if (WS.txing) el.textContent = `TX now: ${WS.msg} (until ${hm(WS.txPeriod + 120)})`;
@@ -1556,7 +1587,7 @@ function wsprWfOverlay() {
   $('wsprtxf').value = store.get('wsprtxf', '1500'); $('wsprpct').value = store.get('wsprpct', '20');
   window.addEventListener('resize', wsprWfOverlay);
   if (store.get('wspr', false)) wsprSet(true);
-  setInterval(wsprTick, 250);
+  every250(wsprTick);                    // the TX decision window (0.9 ... 3 s) also in a background tab
 })();
 setTab(store.get('tab', 'spec'));
 // a new Enable starts the tries afresh (after "no answer, TX stopped" the same message can be sent again)
@@ -1760,12 +1791,12 @@ async function setPtt(on, fromBoard = false) {
   mbarPtt();
   applyMic();
   if (TXA.node) TXA.node.port.postMessage({ on });
-  clearInterval(TXA.ka);
+  TXA.ka = stop250(TXA.ka);
   if (on) {
     TXA.pttSince = Date.now(); TXA.sawActive = false;
     if (!TXA.out) log('PTT: no TX audio output (Mic on with the board connected), the board transmits silence.');
     await cmd('ptt on');
-    TXA.ka = setInterval(() => cmd('ptt ka', true), 250);       // the board drops TX after 1 s without it
+    TXA.ka = every250(() => cmd('ptt ka', true));       // the board drops TX after 1 s without it
   } else {
     TXA.tuning = false; applyMic();
     if (!fromBoard) await cmd('ptt off');
@@ -1937,6 +1968,9 @@ function afterConnect() {
     cmd('station', true);                // station data from the board's flash (fills call, grid, power, TX Hz)
     const xr = store.get('xtalref', null);   // this device's SOF reference: RX / TX follow the crystal live
     if (xr !== null) cmd(`xtal ref ${xr >= 0 ? '+' : ''}${Number(xr).toFixed(3)}`, true);
+    // no reference from a calibration on this device: follow the crystal from now on (relative; the absolute
+    // error is the stored crystal value at the present temperature), after the SOF measurement has 2 s of history
+    else setTimeout(() => { if (link && link.kind === 'usb') cmd('xtal ref now', true); }, 3000);
     if (A.node || F.on || WS.on || V.tab === 'ft8' || V.tab === 'wspr') cmd('stream audio on', true);
     if (!A.ctx && store.get('listening', false)) listen();
     if (TXA.node) cmd('stream txaudio on', true);
