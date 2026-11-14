@@ -97,6 +97,8 @@ class HashBook {
 const MAXGRID4 = 32400;
 const isGrid4 = w => /^[A-R][A-R][0-9][0-9]$/.test(w) && w !== 'RR73';
 function packG15(w) {
+  if (w === 'RR73') return 17 * 1800 + 17 * 100 + 73;   // as the (unused) grid RR73, as WSJT-X sends it; the
+                                                        // reference program's 32403 decodes the same (unpackG15)
   if (isGrid4(w)) return (w.charCodeAt(0) - 65) * 1800 + (w.charCodeAt(1) - 65) * 100 + (+w[2]) * 10 + (+w[3]);
   if (w === '') return MAXGRID4 + 1;
   if (w === 'RRR') return MAXGRID4 + 2;
@@ -109,6 +111,7 @@ function unpackG15(g, ack) {
   const R = ack ? 'R' : '';
   if (g < MAXGRID4) {
     const s = String.fromCharCode(65 + Math.floor(g / 1800), 65 + Math.floor(g / 100) % 18) + String(g % 100).padStart(2, '0');
+    if (s === 'RR73') return 'RR73';
     return ack ? 'R ' + s : s;
   }
   const irpt = g - MAXGRID4;
@@ -270,7 +273,8 @@ function gfskPulse() {
   }
   return pulse;
 }
-function synth(tones, f0, amp = 1) {
+// phase (radians) of the GFSK waveform, one value per 12 kS/s sample
+function gfskPhase(tones, f0) {
   const p = gfskPulse(), n = tones.length * NSPS;
   const dev = new Float64Array(n + 2 * NSPS);   // frequency deviation in tone steps, one symbol margin each side
   const ext = [tones[0], ...tones, tones[tones.length - 1]];   // the end tones held, no sweep from 0
@@ -279,14 +283,22 @@ function synth(tones, f0, amp = 1) {
       const at = (j - 1) * NSPS + i;    // pulse j starts 1.5 symbols before its centre
       if (at >= 0 && at < dev.length) dev[at] += ext[j] * p[i];
     }
-  const out = new Float32Array(n), ramp = NSPS / 8;
+  const phase = new Float64Array(n);
   let ph = 0;
   for (let i = 0; i < n; i++) {
     ph += 2 * Math.PI * (f0 + dev[i + NSPS] * TONE_HZ) / FS;   // dev[] starts one symbol early
+    phase[i] = ph;
+  }
+  return phase;
+}
+// waveform: amplitude amp with the 20 ms raised-cosine ramps
+function synth(tones, f0, amp = 1) {
+  const phase = gfskPhase(tones, f0), n = phase.length, out = new Float32Array(n), ramp = NSPS / 8;
+  for (let i = 0; i < n; i++) {
     let a = amp;
     if (i < ramp) a *= 0.5 * (1 - Math.cos(Math.PI * i / ramp));
     else if (i >= n - ramp) a *= 0.5 * (1 - Math.cos(Math.PI * (n - 1 - i) / ramp));
-    out[i] = a * Math.sin(ph);
+    out[i] = a * Math.sin(phase[i]);
   }
   return out;
 }
@@ -372,6 +384,7 @@ function ldpcDecodeFast(llr, iters = 40) {
   return null;
 }
 
+let LLR_MODE = 1;                       // 0: bit metrics normalised over the codeword only, 1: also per symbol (real band: +2 decodes in 186)
 const FS2 = 187.5, SPS2 = 30;           // baseband rate after the narrow-band step, samples per symbol
 const NBIG = 262144, NSMALL = 4096;     // whole-slot FFT (21.8 s), baseband IFFT (= NBIG x 187.5 / 12000)
 
@@ -391,11 +404,12 @@ function coarse(audio, fmin, fmax, maxCand) {
     P.push(p);
   }
   const off = Array.from({ length: 8 }, (_, k) => Math.round(k * TONE_HZ / df));
-  const cands = [];
+  const raw = [];
   const b0min = Math.max(1, Math.floor(fmin / df)), b0max = Math.min(bmax - off[7] - 1, Math.ceil(fmax / df));
+  const t0min = -10, t0max = nfr - 2 * 78 - 1 + 10;
+  const sc = new Float64Array(t0max - t0min + 1);
   for (let b0 = b0min; b0 <= b0max; b0++) {
-    let best = 0, bestT = 0;
-    for (let t0 = -10; t0 + 2 * 72 + 2 * 6 < nfr; t0++) {
+    for (let t0 = t0min; t0 <= t0max; t0++) {
       let sig = 0, all = 0;
       for (const so of [0, 36, 72])
         for (let k = 0; k < 7; k++) {
@@ -406,15 +420,24 @@ function coarse(audio, fmin, fmax, maxCand) {
           for (let j = 0; j < 8; j++) all += row[b0 + off[j]];
         }
       const noise = (all - sig) / 7;
-      const sc = noise > 0 ? sig / noise : 0;
-      if (sc > best) { best = sc; bestT = t0; }
+      sc[t0 - t0min] = noise > 0 ? sig / noise : 0;
     }
-    cands.push({ f0: b0 * df, frame: bestT, score: best });
+    // up to three time peaks per frequency (two stations can share a frequency at different DT)
+    const peaks = [];
+    for (let i = 0; i < sc.length; i++)
+      if (sc[i] > 1.5 && (i === 0 || sc[i] >= sc[i - 1]) && (i === sc.length - 1 || sc[i] >= sc[i + 1])) peaks.push(i);
+    peaks.sort((a, b) => sc[b] - sc[a]);
+    for (const i of peaks.slice(0, 3)) raw.push({ f0: b0 * df, b0, frame: i + t0min, score: sc[i] });
   }
-  // local maxima in frequency, strongest first
-  const out = cands.filter((c, i) => c.score > 1.6 && (i === 0 || c.score >= cands[i - 1].score) && (i === cands.length - 1 || c.score >= cands[i + 1].score));
-  out.sort((a, b) => b.score - a.score);
-  return out.slice(0, maxCand);
+  // strongest first; drop a candidate next to a stronger one (+-1 bin, +-2 half symbols)
+  raw.sort((a, b) => b.score - a.score);
+  const out = [];
+  for (const c of raw) {
+    if (out.some(o => Math.abs(o.b0 - c.b0) <= 1 && Math.abs(o.frame - c.frame) <= 2)) continue;
+    out.push(c);
+    if (out.length >= maxCand) break;
+  }
+  return out;
 }
 
 // 2. the band around f0 as complex baseband at 187.5 S/s; tone k at (k - 3.5) x 6.25 Hz
@@ -504,6 +527,10 @@ function decodeCandidate(spec, c, hashes) {
       for (let k = 0; k < 8; k++) { const bit = (INV_GRAY[k] >> (2 - b)) & 1; if (bit) m1 = Math.max(m1, m[k]); else m0 = Math.max(m0, m[k]); }
       llr[3 * si + b] = m0 - m1;
     }
+    if (LLR_MODE === 1) {                // per symbol: relative to the symbol's strongest tone
+      let mx = 0; for (let k = 0; k < 8; k++) mx = Math.max(mx, m[k]);
+      for (let b = 0; b < 3; b++) llr[3 * si + b] /= mx + 1e-30;
+    }
   }
   let ss = 0; for (const x of llr) ss += x * x;
   const scale = 2.83 / Math.sqrt(ss / 174 + 1e-30);
@@ -524,26 +551,56 @@ function decodeCandidate(spec, c, hashes) {
   return { text, freq: c.f0 + (best.dfo - fOff), dt: best.i0 / FS2 - 0.5, snr, iters: d.iters, sync: best.s, tones, bits77: Uint8Array.from(bits77) };
 }
 
-// audio: Float32Array of one slot at 12 kS/s (up to 15 s, sample 0 = slot start)
+// remove a decoded signal from the audio: its waveform phase is known, its complex envelope is
+// estimated by mixing the audio down with that phase and averaging over one symbol
+function subtract(audio, d) {
+  const phase = gfskPhase(d.tones, d.freq), start = Math.round((d.dt + 0.5) * FS), n = phase.length;
+  const zr = new Float64Array(n), zi = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    const k = start + i;
+    if (k < 0 || k >= audio.length) continue;
+    zr[i] = audio[k] * Math.cos(phase[i]); zi[i] = -audio[k] * Math.sin(phase[i]);
+  }
+  // moving average over NSPS samples (centred): 2 x the mean is the complex amplitude
+  const half = NSPS / 2;
+  let sr = 0, si = 0;
+  const cr = new Float64Array(n + 1), ci = new Float64Array(n + 1);
+  for (let i = 0; i < n; i++) { sr += zr[i]; si += zi[i]; cr[i + 1] = sr; ci[i + 1] = si; }
+  for (let i = 0; i < n; i++) {
+    const k = start + i;
+    if (k < 0 || k >= audio.length) continue;
+    const a = Math.max(0, i - half), b = Math.min(n, i + half), m = b - a;
+    const ar = 2 * (cr[b] - cr[a]) / m, ai = 2 * (ci[b] - ci[a]) / m;
+    audio[k] -= ar * Math.cos(phase[i]) - ai * Math.sin(phase[i]);
+  }
+}
+
+// audio: Float32Array of one slot at 12 kS/s (up to 15 s, sample 0 = slot start); not modified
 function decode(audio, opt = {}) {
-  const fmin = opt.fmin || 150, fmax = opt.fmax || 2900, hashes = opt.hashes || null;
-  const t0 = Date.now();
-  const cands = coarse(audio, fmin, fmax, opt.maxCand || 120);
-  const re = new Float64Array(NBIG), im = new Float64Array(NBIG);
-  re.set(audio.subarray(0, Math.min(audio.length, NBIG)));
-  fft(re, im);
-  const spec = { re, im }, found = new Map();
-  for (const c of cands) {
-    const d = decodeCandidate(spec, c, hashes);
-    if (d && !found.has(d.text)) found.set(d.text, d);
+  const fmin = opt.fmin || 150, fmax = opt.fmax || 3100, hashes = opt.hashes || null, passes = opt.passes || 3;
+  const t0 = Date.now(), work = Float32Array.from(audio), found = new Map();
+  let ncand = 0;
+  for (let pass = 0; pass < passes; pass++) {
+    const cands = coarse(work, fmin, fmax, opt.maxCand || 250);
+    ncand += cands.length;
+    const re = new Float64Array(NBIG), im = new Float64Array(NBIG);
+    re.set(work.subarray(0, Math.min(work.length, NBIG)));
+    fft(re, im);
+    const spec = { re, im }, fresh = [];
+    for (const c of cands) {
+      const d = decodeCandidate(spec, c, hashes);
+      if (d && !found.has(d.text)) { found.set(d.text, d); fresh.push(d); }
+    }
+    if (!fresh.length) break;
+    for (const d of fresh) subtract(work, d);
   }
   const out = [...found.values()].sort((a, b) => a.freq - b.freq);
-  out.ms = Date.now() - t0; out.candidates = cands.length;
+  out.ms = Date.now() - t0; out.candidates = ncand;
   return out;
 }
 
 const FT8 = { pack77, unpack77, crc14, encode174, symbols, synth, encode, hashCall, HashBook, stdCall6,
-              decode, ldpcDecode: ldpcDecodeFast, fft,
+              decode, ldpcDecode: ldpcDecodeFast, fft, setLlrMode: m => { LLR_MODE = m; },
               COSTAS, GRAY, COLS, GEN_BITS: genBits, NSYM, FS, NSPS, TONE_HZ };
 if (typeof module !== 'undefined' && module.exports) module.exports = FT8; else root.FT8 = FT8;
 })(typeof self !== 'undefined' ? self : this);
