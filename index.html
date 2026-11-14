@@ -1111,7 +1111,15 @@ function applyMic() {
   TXA.gate.gain.setTargetAtTime(TXA.ptt ? 1 : 0, t, 0.005);
   TXA.toneGain.gain.setTargetAtTime(TXA.tuning ? 0.316 : 0, t, 0.005);   // -10 dB
 }
+// PTT on with the microphone chain running (switched on first if needed: without it the board
+// would transmit an empty carrier); a release during the permission prompt cancels it
+async function pttWithMic() {
+  TXA.want = true;
+  if (!TXA.ctx) { await micOn(); if (!TXA.ctx || !TXA.want) return; }
+  setPtt(true);
+}
 async function setPtt(on, fromBoard = false) {
+  if (!on) TXA.want = false;
   if (on === TXA.ptt) return;
   TXA.ptt = on;
   if (on) TXA.pttSince = Date.now();
@@ -1138,19 +1146,23 @@ async function setPtt(on, fromBoard = false) {
     e.preventDefault();
     if ($('latch').checked) {
       if (!TXA.ptt && !confirm('Latching PTT: transmit until you press again (the board still stops at its time-out). Continue?')) return;
-      setPtt(!TXA.ptt);
-    } else { b.setPointerCapture(e.pointerId); setPtt(true); }
+      if (TXA.ptt) setPtt(false); else pttWithMic();
+    } else { b.setPointerCapture(e.pointerId); pttWithMic(); }
   });
-  const up = () => { if (!$('latch').checked) setPtt(false); };
+  const up = () => { if (!$('latch').checked) { TXA.want = false; setPtt(false); } };
   b.addEventListener('pointerup', up); b.addEventListener('pointercancel', up);
   const t = $('tunebtn');
   t.addEventListener('contextmenu', e => e.preventDefault());
-  t.addEventListener('pointerdown', e => { e.preventDefault(); t.setPointerCapture(e.pointerId); TXA.tuning = true; setPtt(true); applyMic(); });
+  t.addEventListener('pointerdown', async e => {
+    e.preventDefault(); t.setPointerCapture(e.pointerId);
+    if (!TXA.ctx) { await micOn(); if (!TXA.ctx) return; }       // the tune tone is made in the microphone chain
+    TXA.tuning = true; setPtt(true); applyMic();
+  });
   const tup = () => { if (TXA.tuning) setPtt(false); };
   t.addEventListener('pointerup', tup); t.addEventListener('pointercancel', tup);
   const typing = () => ['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement.tagName) && document.activeElement.type !== 'checkbox' && document.activeElement.type !== 'range';
-  window.addEventListener('keydown', e => { if (e.code === 'Space' && !e.repeat && !typing()) { e.preventDefault(); if ($('latch').checked) setPtt(!TXA.ptt); else setPtt(true); } });
-  window.addEventListener('keyup', e => { if (e.code === 'Space' && !typing()) { e.preventDefault(); if (!$('latch').checked) setPtt(false); } });
+  window.addEventListener('keydown', e => { if (e.code === 'Space' && !e.repeat && !typing()) { e.preventDefault(); if ($('latch').checked && TXA.ptt) setPtt(false); else pttWithMic(); } });
+  window.addEventListener('keyup', e => { if (e.code === 'Space' && !typing()) { e.preventDefault(); if (!$('latch').checked) { TXA.want = false; setPtt(false); } } });
   // leaving the page or hiding it always releases PTT (the board also drops TX after 1 s without keepalive)
   const release = () => { if (TXA.ptt) setPtt(false); };
   window.addEventListener('pagehide', release);
@@ -1337,11 +1349,7 @@ function mbarPtt() {
 setInterval(() => { if (TXA.ptt) mbarPtt(); }, 500);
 mbarPtt();
 $('mptt').addEventListener('contextmenu', e => e.preventDefault());
-$('mptt').addEventListener('click', async () => {
-  if (TXA.ptt) { setPtt(false); return; }
-  if (!TXA.ctx) { await micOn(); if (!TXA.ctx) return; }
-  setPtt(true);
-});
+$('mptt').addEventListener('click', () => { if (TXA.ptt) setPtt(false); else pttWithMic(); });
 $('mlisten').addEventListener('click', listen);
 $('mmute').addEventListener('click', () => {
   $('amute').checked = !$('amute').checked; applyAudio();
