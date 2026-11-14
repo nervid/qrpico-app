@@ -1158,7 +1158,7 @@ function ft8SetMsg(msg, step) {
 // CQ in the coming slot
 function ft8Cq() {
   if (!ft8Check()) return;
-  Object.assign(Q, { his: null, hisGrid: '', sentRpt: '', rcvdRpt: '', logged: false, parity: slotParity(Date.now() / 1000 + 15) });
+  Object.assign(Q, { his: null, hisGrid: '', sentRpt: '', rcvdRpt: '', logged: false, tries: 0, parity: slotParity(Date.now() / 1000 + 15) });
   ft8SetMsg(`CQ ${Q.my} ${Q.grid}`, 'cq');
 }
 // answer the station of a decode (row tap), in the other slot parity
@@ -1169,7 +1169,7 @@ function ft8Answer(d, slot) {
   const his = w[0] === 'CQ' ? w[w.length - (isGrid(w[w.length - 1]) ? 2 : 1)] : w[1];
   if (!his || his.startsWith('<')) { log('FT8: no call to answer in "' + d.text + '"'); return; }
   Object.assign(Q, { his, hisGrid: w[0] === 'CQ' && isGrid(w[w.length - 1]) ? w[w.length - 1] : '', sentRpt: '', rcvdRpt: '', logged: false,
-                     parity: 1 - slotParity(slot) });
+                     tries: 0, parity: 1 - slotParity(slot) });
   ft8SetMsg(`${his} ${Q.my} ${Q.grid}`, 'grid');
 }
 // the next message after a decode addressed to me from the station of this QSO
@@ -1319,7 +1319,8 @@ function ft8WfOverlay() {
   window.addEventListener('resize', ft8WfOverlay);
 })();
 setTab(store.get('tab', 'spec'));
-$('ft8en').addEventListener('click', () => { if (!Q.en && !ft8Check()) return; Q.en = !Q.en; if (!Q.en) ft8Halt(); ft8Show(); });
+// a new Enable starts the tries afresh (after "no answer, TX stopped" the same message can be sent again)
+$('ft8en').addEventListener('click', () => { if (!Q.en && !ft8Check()) return; Q.en = !Q.en; if (Q.en) Q.tries = 0; else ft8Halt(); ft8Show(); });
 $('ft8cq').addEventListener('click', () => { ft8Cq(); });
 $('ft8halt').addEventListener('click', ft8Halt);
 ['ft8call', 'ft8grid', 'ft8txf'].forEach(id => $(id).addEventListener('change', ft8Settings));
