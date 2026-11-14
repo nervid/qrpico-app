@@ -71,8 +71,15 @@ label.inline { display: flex; gap: 6px; align-items: center; color: var(--muted)
 .ptt { width: 100%; padding: 14px; font-size: 16px; font-weight: 700; letter-spacing: 0.04em; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 .stepbtn { min-width: 2.4em; font-weight: 700; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 .mbar { display: none; }
+.ft8list { font: 12px var(--mono); max-height: 280px; overflow-y: auto; margin-top: 6px; border-top: 1px solid var(--line); }
+.ft8row { display: grid; grid-template-columns: 4.6em 2.6em 3.2em 3.4em minmax(0, 1fr); gap: 0 6px; padding: 2px 0; }
+.ft8row > span:last-child { overflow-wrap: anywhere; }
+.ft8row.cq > span:last-child { color: var(--ok); font-weight: 600; }
+.ft8row.slot { border-top: 1px solid var(--line); margin-top: 2px; }
+.ft8row.head { color: var(--muted); }
 /* touch screens: larger targets (about 44 px), larger frequency, the PTT button taller */
 @media (pointer: coarse) {
+  .ft8row { padding: 6px 0; }
   .mbar { display: flex; gap: 8px; position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
           background: var(--panel); border-top: 1px solid var(--line); box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.25); }
   .mbar button { flex: 1; min-height: 56px; }
@@ -194,6 +201,12 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
       <div class="row" style="margin-top:6px"><span class="note" style="margin:0">level</span><div class="meter"><div id="alevel"></div></div></div>
       <p class="note" id="anote">Plays the board's receive audio (USB / LSB) from the WebUSB stream, or from its USB audio input if one is chosen. Muted while transmitting.</p>
     </div>
+    <div class="panel" id="p-ft8">
+      <h2>FT8</h2>
+      <div class="row"><button id="ft8on">Decode FT8</button><button id="ft8clear">Clear</button></div>
+      <p class="note" id="ft8st">Decodes every 15 s slot from the board's receive audio (USB, e.g. 14.074 MHz). Needs the PC / phone clock within about ±1 s (NTP).</p>
+      <div class="ft8list" id="ft8list" role="log" aria-label="FT8 decodes"></div>
+    </div>
     <div class="panel">
       <h2>TX</h2>
       <div class="field">
@@ -231,9 +244,13 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
   <button id="mmute">Mute</button>
   <button id="mptt" class="ptt" aria-pressed="false">PTT</button>
 </div>
+<script src="ft8.js"></script>
 <script>
 'use strict';
 // ---------------------------------------------------------------- protocol (docs/usb-protocol.md)
+// FT8 decoder state (section "FT8 decoding"); here because the waterfall overlay reads F.marks
+const F = { on: false, worker: null, ring: new Float32Array(12000 * 32), next: -1, offs: null, offsAt: 0, lastSlot: 0,
+            busy: false, marks: [], rows: 0 };
 const T_CMD = 0x01, T_AUDIO_TX = 0x02, T_TEXT = 0x81, T_SPECTRUM = 0x82, T_STATUS = 0x83, T_AUDIO = 0x84;
 const VID = 0x1209, PID = 0x0001;
 
@@ -447,11 +464,30 @@ function startDemo() {
       const n = Math.min(192, due - A12.idx), pl = new Uint8Array(8 + 2 * n), v = new DataView(pl.buffer);
       v.setUint32(0, A12.idx >>> 0, true); v.setUint16(4, n, true); v.setUint16(6, due - A12.idx - n, true);
       for (let i = 0; i < n; i++, A12.idx++) {
-        const x = st.mode ? 0.05 * Math.sin(2 * Math.PI * 1000 * A12.idx / 12000) + 0.03 * (rand() - 0.5) : 0;
-        v.setInt16(8 + 2 * i, Math.round(x * 32767), true);
+        const x = st.mode ? demoFt8(A12.w0 + A12.idx / (12000 * (1 + 300e-6))) + 0.01 * (rand() + rand() + rand() - 1.5) : 0;
+        v.setInt16(8 + 2 * i, Math.round(Math.max(-1, Math.min(1, x)) * 32767), true);
       }
       parser.push(encodeFrame(T_AUDIO, pl));
     }
+  }
+  // a few FT8 stations per 15 s slot (wall clock), weak to moderate, in the demo's receive audio
+  const demoCalls = ['OE3XYZ', 'DL1ABC', 'G4XYZ', 'JA1ABC', 'VK2XYZ', 'K1ABC', 'F5ABC', 'I2XYZ', 'SP9ABC', 'HB9ABC'];
+  function demoFt8(t) {
+    const slot = Math.floor(t / 15) * 15;
+    if (!st.ft8 || st.ft8.slot !== slot) {
+      const buf = new Float32Array(180000), k0 = Math.floor(slot / 15);
+      if (typeof FT8 !== 'undefined')
+        for (let j = 0; j < 5; j++) {
+          const a = demoCalls[(k0 + 3 * j) % 10], b = demoCalls[(k0 + 3 * j + 4) % 10];
+          const text = j % 2 ? `${a} ${b} -${String(8 + j * 2).padStart(2, '0')}` : `CQ ${a} JN${70 + j}`;
+          const snr = -6 - 3 * j, amp = Math.sqrt(2 * 1e-4 / 3 * 2500 / 6000 * Math.pow(10, snr / 10));
+          const w = FT8.synth(FT8.encode(text).tones, 500 + 380 * j + (k0 % 4) * 20, amp), at = 6000 + 400 * j;
+          for (let i = 0; i < w.length && at + i < buf.length; i++) buf[at + i] += w[i];
+        }
+      st.ft8 = { slot, buf };
+    }
+    const i = Math.floor((t - slot) * 12000);
+    return i >= 0 && i < 180000 ? st.ft8.buf[i] : 0;
   }
   function handle(line) {
     const a = line.trim().split(/\s+/);
@@ -472,7 +508,7 @@ function startDemo() {
     else if (a[0] === 'rx' && a[1] === 'test') { st.t1 = [Number(a[2]) - st.wanted, Number(a[3])]; if (a[4]) st.t2 = [Number(a[4]) - st.wanted, Number(a[5])]; out = 'test source set\n'; }
     else if (a[0] === 'stream' && a[1] === 'audio') {
       clearInterval(st.audio && st.audio.timer); st.audio = null;
-      if (a[2] === 'on') { st.audio = { t0: performance.now(), idx: 0 }; st.audio.timer = setInterval(audioFrames, 10); }
+      if (a[2] === 'on') { st.audio = { t0: performance.now(), w0: Date.now() / 1000, idx: 0 }; st.audio.timer = setInterval(audioFrames, 10); }
       out = `stream audio ${a[2]}\n`;
     }
     else if (a[0] === 'stream') out = `stream ${a[1]}\n`;
@@ -730,6 +766,19 @@ function drawWfOverlay() {
   g.beginPath(); g.moveTo(xl, 0); g.lineTo(xl, H); g.stroke();
   g.setLineDash([]); g.globalAlpha = 0.9; g.strokeStyle = css('--tune'); g.lineWidth = 1.5 * dpr;
   g.beginPath(); g.moveTo(xt, 0); g.lineTo(xt, H); g.stroke(); g.globalAlpha = 1;
+  // FT8 decodes of the last slot: tick and call at the top of the waterfall, staggered in three rows
+  if (F.marks.length) {
+    g.font = `${11 * dpr}px ui-monospace, monospace`; g.textBaseline = 'top';
+    const free = [0, 0, 0];               // per row: x where the next label may start (no overlaps; at a
+    F.marks.slice().sort((a, b) => a.rf - b.rf).forEach(m => {    // wide span only some labels fit)
+      const x = xOf(m.rf, sp, W), tw = g.measureText(m.label).width + 4 * dpr, r = free.findIndex(f => x >= f);
+      if (x < 0 || x > W || r < 0) return;
+      const y = (2 + r * 13) * dpr;
+      free[r] = x + tw + 2 * dpr;
+      g.fillStyle = 'rgba(0,0,0,0.55)'; g.fillRect(x - 1, y - 1, tw, 13 * dpr);
+      g.fillStyle = m.cq ? '#7ee787' : '#e6e9ee'; g.fillText(m.label, x + dpr, y);
+    });
+  }
 }
 
 // splitter between spectrum and waterfall
@@ -820,11 +869,13 @@ class QrpicoRx extends AudioWorkletProcessor {
 registerProcessor('qrpico-rx', QrpicoRx);
 `;
 function rxAudioFrame(p) {
-  if (!A.node) return;
-  const v = new DataView(p.buffer, p.byteOffset, p.byteLength), n = v.getUint16(4, true);
+  const v = new DataView(p.buffer, p.byteOffset, p.byteLength), n = v.getUint16(4, true), first = v.getUint32(0, true);
   const s = new Int16Array(p.buffer.slice(p.byteOffset + 8, p.byteOffset + 8 + 2 * n));   // little endian like the board
-  A.node.port.postMessage({ first: v.getUint32(0, true), s }, [s.buffer]);
+  if (F.on) ft8Collect(first, s);
+  if (A.node) A.node.port.postMessage({ first, s }, [s.buffer]);
 }
+// the WebUSB audio stream runs while the player or the FT8 decoder needs it
+function audioStream() { if (link) cmd(`stream audio ${A.node || F.on ? 'on' : 'off'}`, true); }
 // Device names appear only while the page holds the microphone permission. With a one-time grant
 // (and on file:// pages) it can end when the last stream stops, so the list is taken while the
 // permission stream is still open, and the last list with names is kept (A.devs).
@@ -886,7 +937,7 @@ function showRxStats() {
 function stopListen() {
   cancelAnimationFrame(A.raf);
   if (A.stream) A.stream.getTracks().forEach(t => t.stop());
-  if (A.node) { A.node.port.onmessage = null; cmd('stream audio off', true); }
+  if (A.node) { A.node.port.onmessage = null; A.node = null; audioStream(); }
   if (A.ctx) A.ctx.close();
   Object.assign(A, { ctx: null, stream: null, gain: null, an: null, node: null, stats: null });
   $('listen').textContent = 'Listen'; $('listen').classList.add('primary'); $('listen').classList.remove('active'); $('alevel').style.width = '0';
@@ -940,6 +991,77 @@ async function listen() {
     if (S.status && S.status.mode === 0) log('audio: mode I/Q plays I on the left and Q on the right; choose USB or LSB to listen.');
   } catch (e) { log('audio: ' + e.message); stopListen(); }
 }
+
+// ---------------------------------------------------------------- FT8 decoding (ft8.js in a worker)
+// Every sample of the 12 kS/s stream gets a wall-clock time: index / 12000 + offs, with offs the
+// smallest (arrival time - index / 12000) seen in the last 30 s (the least delayed frame). 13.6 s after
+// each slot start (UTC 0 / 15 / 30 / 45 s) the slot's 15 s go to the worker.
+function ft8Collect(first, s) {
+  if (F.next >= 0 && (first < F.next - 12000 || first > F.next + 12000)) { F.offs = null; }   // stream restarted
+  const N = F.ring.length;
+  for (let i = 0; i < s.length; i++) F.ring[(first + i) % N] = s[i] / 32768;
+  F.next = first + s.length;
+  const now = Date.now() / 1000, est = now - F.next / 12000;
+  if (F.offs === null || est < F.offs || now - F.offsAt > 30) { F.offs = est; F.offsAt = now; }
+}
+function ft8Tick() {
+  if (!F.on || F.offs === null || F.busy) return;
+  const now = Date.now() / 1000, slot = Math.floor(now / 15) * 15;
+  if (now - slot < 13.6 || slot === F.lastSlot) return;
+  F.lastSlot = slot;
+  const i0 = Math.round((slot - F.offs) * 12000), N = F.ring.length, audio = new Float32Array(180000);
+  let have = 0;
+  for (let i = 0; i < 180000; i++) {
+    const k = i0 + i;
+    if (k < F.next - N + 1 || k >= F.next || k < 0) continue;      // not received (yet) or overwritten
+    audio[i] = F.ring[k % N]; have++;
+  }
+  if (have < 120000) { $('ft8st').textContent = `slot ${hms(slot)}: only ${(have / 12000).toFixed(1)} s of audio, not decoded`; return; }
+  if (!F.worker) {
+    F.worker = new Worker('ft8worker.js');
+    F.worker.onmessage = e => ft8Result(e.data);
+    F.worker.onerror = e => { F.busy = false; log('FT8 worker: ' + e.message); };
+  }
+  F.busy = true;
+  F.worker.postMessage({ slot, audio, opt: { fmin: 150, fmax: 2900 } }, [audio.buffer]);
+}
+const hms = t => new Date(t * 1000).toISOString().slice(11, 19).replace(/:/g, '');
+function ft8Result(r) {
+  F.busy = false;
+  const list = $('ft8list'), dial = S.wanted, usb = (S.status ? S.status.mode : modeNames.indexOf(S.mode)) !== 2;
+  const dts = r.decodes.map(d => d.dt).sort((a, b) => a - b), med = dts.length ? dts[dts.length >> 1] : null;
+  $('ft8st').textContent = `slot ${hms(r.slot)}: ${r.decodes.length} decode${r.decodes.length === 1 ? '' : 's'}, ${r.ms} ms` +
+    (med !== null ? `, median DT ${med >= 0 ? '+' : ''}${med.toFixed(2)} s${Math.abs(med) > 0.8 ? ' (clock off?)' : ''}` : '') +
+    (S.status && S.status.mode === 0 ? ' - mode I/Q: choose USB' : '');
+  const frag = document.createDocumentFragment();
+  r.decodes.forEach((d, i) => {
+    const row = document.createElement('div');
+    row.className = 'ft8row' + (i === 0 ? ' slot' : '') + (/^CQ /.test(d.text) ? ' cq' : '');
+    [hms(r.slot), String(d.snr), d.dt.toFixed(1), String(Math.round(d.freq)), d.text]
+      .forEach(t => { const c = document.createElement('span'); c.textContent = t; row.appendChild(c); });
+    frag.appendChild(row);
+  });
+  const atTop = list.scrollTop < 8;
+  list.insertBefore(frag, list.firstChild);
+  while (list.children.length > 300) list.removeChild(list.lastChild);
+  if (atTop) list.scrollTop = 0;
+  // waterfall labels: the sender (2nd word, or the call after CQ) at the RF frequency of the signal
+  F.marks = r.decodes.map(d => {
+    const w = d.text.split(' '), who = w[0] === 'CQ' ? w[w.length - (/^[A-R]{2}[0-9]{2}$/.test(w[w.length - 1]) ? 2 : 1)] : (w[1] || w[0]);
+    return { rf: dial + (usb ? 1 : -1) * (d.freq + 22), label: who, cq: w[0] === 'CQ' };
+  });
+  drawWfOverlay();
+}
+function ft8Set(on) {
+  F.on = on; store.set('ft8', on);
+  $('ft8on').textContent = on ? 'Stop FT8' : 'Decode FT8'; $('ft8on').classList.toggle('active', on);
+  if (!on) { F.marks = []; drawWfOverlay(); }
+  F.offs = null; F.next = -1;
+  audioStream();
+}
+$('ft8on').addEventListener('click', () => ft8Set(!F.on));
+$('ft8clear').addEventListener('click', () => { $('ft8list').textContent = ''; F.marks = []; drawWfOverlay(); });
+setInterval(ft8Tick, 250);
 
 // ---------------------------------------------------------------- TX: microphone -> WebUSB stream (default) or "qrpico TX" USB audio output
 const TXA = { ctx: null, stream: null, comp: null, dry: null, gain: null, gate: null, toneGain: null, an: null,
@@ -1303,11 +1425,13 @@ $('txpwr').addEventListener('input', () => {
 function afterConnect() {
   if (link) {
     sendPower();
-    if (A.node) cmd('stream audio on', true); else if (store.get('listening', false) && !A.ctx) listen();
+    if (A.node || F.on) cmd('stream audio on', true);
+    if (!A.ctx && store.get('listening', false)) listen();
     if (TXA.node) cmd('stream txaudio on', true);
   }
 }
 $('connect').addEventListener('click', async () => { await connectUsb(); afterConnect(); });
+if (store.get('ft8', false)) ft8Set(true);
 $('demo').addEventListener('click', startDemo);
 $('help').addEventListener('click', () => { $('helptext').hidden = !$('helptext').hidden; });
 $('theme').addEventListener('click', () => {
