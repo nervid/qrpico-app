@@ -1,0 +1,1249 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>qrpico</title>
+<meta name="description" content="Spectrum, waterfall, tuning, RX audio and PTT for the qrpico transceiver over WebUSB">
+<style>
+:root {
+  --bg: #f4f5f7; --panel: #ffffff; --text: #1b1f24; --muted: #5d6673; --line: #d7dbe1;
+  --accent: #0b6bcb; --accent-text: #ffffff; --warn: #b54708; --ok: #13795b;
+  --spec-bg: #0d1117; --spec-grid: #263041; --spec-line: #7cc4ff; --spec-fill: rgba(124,196,255,0.18);
+  --lo: #f2c94c; --tune: #ff5c5c; --pass: rgba(255,92,92,0.16); --edge: rgba(0,0,0,0.35);
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0b0e13; --panel: #141922; --text: #e6e9ee; --muted: #9aa4b2; --line: #263041;
+    --accent: #4aa3ff; --accent-text: #08111c; --warn: #f5a524; --ok: #3ccf91;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0b0e13; --panel: #141922; --text: #e6e9ee; --muted: #9aa4b2; --line: #263041;
+  --accent: #4aa3ff; --accent-text: #08111c; --warn: #f5a524; --ok: #3ccf91;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--bg); color: var(--text); font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+header { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
+header h1 { font-size: 16px; margin: 0 8px 0 0; letter-spacing: 0.02em; }
+.chip { font: 12px var(--mono); color: var(--muted); padding: 2px 8px; border: 1px solid var(--line); border-radius: 999px; white-space: nowrap; }
+.chip.ok { color: var(--ok); border-color: var(--ok); }
+.chip.warn { color: var(--warn); border-color: var(--warn); }
+.spacer { flex: 1; }
+button, select, input { font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 5px 10px; }
+button { cursor: pointer; white-space: nowrap; }
+button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+button:disabled { opacity: 0.5; cursor: default; }
+main { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 12px; padding: 12px 16px; height: calc(100% - 54px); }
+@media (max-width: 860px) { main { grid-template-columns: minmax(0, 1fr); height: auto; } }
+.view { display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+.controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.freq { font: 600 22px var(--mono); width: 13ch; text-align: right; padding: 3px 8px; }
+.unit { color: var(--muted); }
+.group { display: flex; gap: 4px; align-items: center; }
+.canvases { position: relative; flex: 1; min-height: 360px; display: flex; flex-direction: column; border-radius: 8px; overflow: hidden; border: 1px solid var(--line); background: var(--spec-bg); }
+#spec { height: var(--spec-h, 240px); min-height: 110px; width: calc(100% - 26px); display: block; cursor: crosshair; flex: none; }
+.split { flex: none; height: 7px; cursor: row-resize; background: #1a2230; border-top: 1px solid #2c3850; border-bottom: 1px solid #2c3850; touch-action: none; }
+.split:hover, .split.drag { background: #2c3c58; }
+.wfbox { position: relative; flex: 1; min-height: 140px; display: flex; }
+#wf, #wfo { position: absolute; inset: 0 26px 0 0; width: calc(100% - 26px); height: 100%; display: block; }
+#wf { cursor: crosshair; }
+#wfo { pointer-events: none; }
+#wfscale { position: absolute; right: 0; top: 0; width: 26px; height: 100%; display: block; }
+.readout { position: absolute; top: 6px; right: 8px; text-align: right; font: 12px var(--mono); color: #c9d4e3; pointer-events: none; text-shadow: 0 1px 2px #000; }
+aside { display: flex; flex-direction: column; gap: 12px; min-height: 0; overflow-y: auto; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+.panel h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 0 0 6px; }
+table.kv { width: 100%; border-collapse: collapse; font: 12px var(--mono); }
+table.kv td { padding: 2px 0; vertical-align: top; }
+table.kv td:last-child { text-align: right; }
+#log { font: 12px var(--mono); white-space: pre-wrap; overflow: auto; height: 180px; margin: 0 0 6px; color: var(--muted); }
+.row { display: flex; gap: 6px; }
+.row input { flex: 1; min-width: 0; font: 12px var(--mono); }
+label.inline { display: flex; gap: 6px; align-items: center; color: var(--muted); font-size: 13px; }
+.note { color: var(--muted); font-size: 12px; margin: 4px 0 0; }
+.range { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font: 12px var(--mono); color: var(--muted); }
+.range input[type=number] { width: 70px; padding: 2px 6px; }
+.range select { padding: 2px 6px; font: 12px var(--mono); }
+.chip.tx { color: #fff; background: #c62828; border-color: #c62828; font-weight: 700; }
+.ptt { width: 100%; padding: 14px; font-size: 16px; font-weight: 700; letter-spacing: 0.04em; touch-action: none; user-select: none; }
+.ptt.on { background: #c62828; border-color: #c62828; color: #fff; }
+.meter.tx > div { background: var(--warn); }
+.meter { height: 8px; background: var(--line); border-radius: 4px; overflow: hidden; flex: 1; align-self: center; }
+.meter > div { height: 100%; width: 0; background: var(--ok); transition: width 80ms linear; }
+input[type=range] { flex: 1; min-width: 0; padding: 0; }
+button.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+.seg { display: inline-flex; }
+.seg button { border-radius: 0; margin-left: -1px; }
+.seg button:first-child { border-radius: 6px 0 0 6px; margin-left: 0; }
+.seg button:last-child { border-radius: 0 6px 6px 0; }
+.sig { font: 600 13px var(--mono); min-width: 13ch; text-align: right; color: var(--muted); }
+details.panel > summary { cursor: pointer; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); list-style: none; }
+details.panel > summary::before { content: '▸ '; }
+details.panel[open] > summary::before { content: '▾ '; }
+details.panel[open] > summary { margin-bottom: 6px; }
+.field { display: grid; grid-template-columns: 6.5em minmax(0, 1fr); gap: 4px 6px; align-items: center; font-size: 13px; }
+.field > span { color: var(--muted); }
+.field select { min-width: 0; width: 100%; }
+.pwr { font: 12px var(--mono); color: var(--muted); white-space: nowrap; }
+.warnnote { color: var(--warn); }
+kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>qrpico</h1>
+  <button id="connect" class="primary">Connect</button>
+  <button id="demo">Demo</button>
+  <span id="st-conn" class="chip">not connected</span>
+  <span id="st-tx" class="chip">RX</span>
+  <span id="st-audio" class="chip">USB audio –</span>
+  <span id="st-lo" class="chip">LO –</span>
+  <span id="st-load" class="chip">core 1 –</span>
+  <span class="spacer"></span>
+  <button id="help" title="Keyboard and mouse">?</button>
+  <button id="theme" title="Toggle light / dark">Theme</button>
+</header>
+<main>
+  <section class="view">
+    <div class="controls">
+      <div class="group">
+        <input id="freq" class="freq" inputmode="decimal" value="14.074000" aria-label="Frequency" title="MHz (14.074), kHz (14074) or Hz; Enter tunes">
+        <span class="unit">MHz</span>
+        <select id="step" aria-label="Tuning step" title="Step for ← → and the wheel">
+          <option value="10">10 Hz</option><option value="100" selected>100 Hz</option><option value="500">500 Hz</option>
+          <option value="1000">1 kHz</option><option value="5000">5 kHz</option>
+        </select>
+      </div>
+      <div class="group seg" role="group" aria-label="Bands">
+        <button data-f="7074000" data-band="3">40 m</button>
+        <button data-f="14074000" data-band="2">20 m</button>
+        <button data-f="28074000" data-band="1">10 m</button>
+      </div>
+      <div class="group seg" role="group" aria-label="Mode">
+        <button data-mode="usb">USB</button>
+        <button data-mode="lsb">LSB</button>
+        <button data-mode="iq">I/Q</button>
+      </div>
+      <div class="group">
+        <button id="rxbtn" title="Start or stop the RX chain">RX start</button>
+        <select id="source" aria-label="Signal source" style="width:auto">
+          <option value="adc" title="PCM1808: antenna input">antenna</option>
+          <option value="test" title="digital test tones (Test source panel)">test</option>
+        </select>
+      </div>
+      <span class="spacer"></span>
+      <span id="sig" class="sig" title="Power in the receive passband (dBFS)">– dBFS</span>
+    </div>
+    <p id="helptext" class="note" hidden>
+      Click spectrum or waterfall: tune · Wheel / <kbd>←</kbd> <kbd>→</kbd>: one step (Shift ×10) · <kbd>↑</kbd> <kbd>↓</kbd>: 1 kHz ·
+      <kbd>Space</kbd>: PTT · <kbd>U</kbd> / <kbd>L</kbd>: USB / LSB · <kbd>M</kbd>: mute · <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd>: 40 / 20 / 10 m.
+      Frequency field: 14.074 (MHz), 14074 (kHz) or 14074000 (Hz).
+    </p>
+    <div class="canvases">
+      <canvas id="spec"></canvas>
+      <div id="split" class="split" title="Drag to resize, double-click to reset" role="separator" aria-orientation="horizontal"></div>
+      <div class="wfbox">
+        <canvas id="wf"></canvas>
+        <canvas id="wfo"></canvas>
+        <canvas id="wfscale"></canvas>
+      </div>
+      <div id="readout" class="readout"></div>
+    </div>
+    <div class="controls">
+      <span class="range">spectrum dB <input id="dbmin" type="number" value="-130" step="5"> to <input id="dbmax" type="number" value="-30" step="5"></span>
+      <span class="range">waterfall <label class="inline"><input id="wfauto" type="checkbox" checked> auto</label>
+        <input id="wfmin" type="number" value="-125" step="5" aria-label="Waterfall minimum dB"> to <input id="wfmax" type="number" value="-75" step="5" aria-label="Waterfall maximum dB">
+        <select id="wfspeed" aria-label="Waterfall speed"><option value="1">fast</option><option value="2" selected>normal</option><option value="4">slow</option></select>
+        <select id="wftick" aria-label="Time marks"><option value="10">marks 10 s</option><option value="15">marks 15 s (FT8)</option><option value="0">no marks</option></select></span>
+      <label class="inline"><input id="hidelo" type="checkbox" checked> interpolate the f_LO bin</label>
+    </div>
+  </section>
+  <aside>
+    <div class="panel">
+      <h2>RX audio</h2>
+      <div class="field">
+        <span>from board</span><select id="ain" aria-label="Board audio input"><option value="">WebUSB stream</option></select>
+        <span>to</span><select id="aout" aria-label="Output device"><option value="">system default output</option></select>
+      </div>
+      <div class="row" style="margin-top:8px"><button id="listen" class="primary">Listen</button><label class="inline" style="flex:1">vol <input id="avol" type="range" min="0" max="2" step="0.01" value="1" aria-label="Volume"></label><label class="inline"><input id="amute" type="checkbox"> mute</label></div>
+      <div class="row" style="margin-top:6px"><span class="note" style="margin:0">level</span><div class="meter"><div id="alevel"></div></div></div>
+      <p class="note" id="anote">Plays the board's receive audio (USB / LSB) from the WebUSB stream, or from its USB audio input if one is chosen. Muted while transmitting.</p>
+    </div>
+    <div class="panel">
+      <h2>TX</h2>
+      <div class="field">
+        <span>power</span><div class="row"><input id="txpwr" type="range" min="0.05" max="0.94" step="0.01" value="0.30" aria-label="TX PEP level"><span id="txpwrv" class="pwr"></span></div>
+        <span>microphone</span><select id="mic" aria-label="Microphone"><option value="">(auto, never the board)</option></select>
+        <span>to board</span><select id="txout" aria-label="Board audio output"><option value="">WebUSB stream</option></select>
+      </div>
+      <div class="row" style="margin-top:8px"><button id="micon">Mic on</button><label class="inline" style="flex:1;min-width:0">gain <input id="mgain" type="range" min="0" max="4" step="0.05" value="1" aria-label="Microphone gain"></label><label class="inline" title="compressor"><input id="mcomp" type="checkbox" checked> comp</label></div>
+      <div class="row" style="margin-top:6px"><span class="note" style="margin:0">mic</span><div class="meter tx"><div id="mlevel"></div></div></div>
+      <div class="row" style="margin-top:6px"><span class="note" style="margin:0">at board</span><div class="meter tx"><div id="blevel"></div></div></div>
+      <button id="ptt" class="ptt" style="margin-top:8px" aria-pressed="false">PTT (hold, or Space)</button>
+      <div class="row" style="margin-top:6px"><label class="inline"><input id="latch" type="checkbox"> latching</label><button id="tunebtn" title="1 kHz tone at -10 dB while held">Tune</button><label class="inline"><input id="txloop" type="checkbox"> txmon loop</label></div>
+      <p class="note" id="txnote">Mic on, then hold PTT: the microphone goes to the board (WebUSB stream, or its USB audio output if one is chosen) only while PTT is on.</p>
+    </div>
+    <details class="panel" id="p-status">
+      <summary>Status</summary>
+      <table class="kv" id="status"><tbody></tbody></table>
+    </details>
+    <details class="panel" id="p-test">
+      <summary>Test source</summary>
+      <div class="row"><input id="t1" value="+1000 -40" aria-label="Tone 1: offset from tuned frequency in Hz, level dBFS"><input id="t2" value="+12000 -70" aria-label="Tone 2"></div>
+      <div class="row" style="margin-top:6px"><button id="tset">Set tones</button><span class="note">offset from the tuned frequency (Hz) and dBFS</span></div>
+    </details>
+    <details class="panel" id="p-console" open>
+      <summary>Console</summary>
+      <pre id="log"></pre>
+      <div class="row"><input id="cmd" placeholder="command, e.g. rx stats (↑ history)" aria-label="Console command"><button id="send">Send</button></div>
+    </details>
+  </aside>
+</main>
+<script>
+'use strict';
+// ---------------------------------------------------------------- protocol (docs/usb-protocol.md)
+const T_CMD = 0x01, T_AUDIO_TX = 0x02, T_TEXT = 0x81, T_SPECTRUM = 0x82, T_STATUS = 0x83, T_AUDIO = 0x84;
+const VID = 0x1209, PID = 0x0001;
+
+function crc16(bytes, crc = 0xFFFF) {
+  for (const b of bytes) {
+    crc ^= b << 8;
+    for (let k = 0; k < 8; k++) crc = (crc & 0x8000) ? ((crc << 1) ^ 0x1021) & 0xFFFF : (crc << 1) & 0xFFFF;
+  }
+  return crc;
+}
+function encodeFrame(type, payload, flags = 0) {
+  const f = new Uint8Array(8 + payload.length);
+  f.set([0x51, 0x50, type, flags, payload.length & 255, payload.length >> 8]);
+  f.set(payload, 6);
+  const c = crc16(f.subarray(2, 6 + payload.length));
+  f[6 + payload.length] = c & 255; f[7 + payload.length] = c >> 8;
+  return f;
+}
+class FrameParser {
+  constructor(onFrame) { this.buf = new Uint8Array(0); this.onFrame = onFrame; this.errors = 0; }
+  push(chunk) {
+    const b = new Uint8Array(this.buf.length + chunk.length); b.set(this.buf); b.set(chunk, this.buf.length); this.buf = b;
+    for (;;) {
+      let i = 0;
+      while (i + 1 < this.buf.length && !(this.buf[i] === 0x51 && this.buf[i + 1] === 0x50)) i++;
+      if (i) this.buf = this.buf.slice(i);
+      if (this.buf.length < 8) return;
+      const len = this.buf[4] | (this.buf[5] << 8);
+      if (this.buf.length < len + 8) return;
+      const c = crc16(this.buf.subarray(2, 6 + len));
+      const got = this.buf[6 + len] | (this.buf[7 + len] << 8);
+      if (c === got) this.onFrame(this.buf[2], this.buf[3], this.buf.slice(6, 6 + len));
+      else { this.errors++; this.buf = this.buf.slice(2); continue; }
+      this.buf = this.buf.slice(len + 8);
+    }
+  }
+}
+function parseSpectrum(p) {
+  const v = new DataView(p.buffer, p.byteOffset, p.byteLength);
+  const n = v.getUint16(32, true), ref = v.getFloat32(24, true), step = v.getFloat32(28, true);
+  const db = new Float32Array(n);
+  for (let k = 0; k < n; k++) db[k] = ref + step * p[36 + k];
+  return { seq: v.getUint32(0, true), fLo: Number(v.getBigInt64(4, true)) / 1000, wanted: Number(v.getBigInt64(12, true)),
+           binHz: v.getFloat32(20, true), db };
+}
+function parseStatus(p) {
+  const v = new DataView(p.buffer, p.byteOffset, p.byteLength);
+  const u32 = o => v.getUint32(o, true), f32 = o => v.getFloat32(o, true);
+  return { wanted: Number(v.getBigInt64(0, true)), fLo: Number(v.getBigInt64(8, true)) / 1000,
+           offset: Number(v.getBigInt64(16, true)) / 1000, mode: p[24], source: p[25], running: p[26], band: p[27],
+           rxEn: p[28], paOn: p[29], audio: p[30], blkAvg: u32(32), blkMax: u32(36), fifo: u32(40), dropped: u32(44),
+           overruns: u32(48), audioFrames: u32(52), adc: [f32(56), f32(60), f32(64), f32(68)], paA: f32(72), paC: f32(76),
+           version: p[31],
+           ...(p.length >= 116 ? { txPeak: f32(80), txRms: f32(84), txRing: u32(88), txOver: u32(92), txUnder: u32(96),
+             txUsbUnder: u32(100), txStreaming: !!(p[104] & 1), txLoop: !!(p[104] & 2), txState: p[105], txReason: p[106],
+             pttSrc: p[107], txElapsed: u32(108), txTimeout: v.getUint16(112, true), dryRun: !!p[114] } : {}),
+           ...(p.length >= 132 ? { txApp: !!(p[104] & 4), appLevel: u32(116), appUnder: u32(120), appOver: u32(124),
+             appSamples: u32(128) } : {}) };
+}
+const txStates = ['RX', 'TX prep', 'TX', 'TX end'];
+const txReasons = ['none', 'released', 'keepalive lost', 'time-out', 'outside band', 'mode not USB/LSB',
+                   'USB supply < 1.5 A', 'PA temperature', 'fault', 'busy'];
+const pttSources = ['-', 'app', 'CAT', 'console'];
+
+// ---------------------------------------------------------------- transport: WebUSB or demo
+let link = null;           // { send(type, bytes), close() }
+const parser = new FrameParser(onFrame);
+const enc = new TextEncoder(), dec = new TextDecoder();
+
+async function connectUsb(given) {
+  if (!navigator.usb) { log('WebUSB is not available in this browser (use Chrome or Edge, served from https or file://).'); return; }
+  try {
+    const dev = given || await navigator.usb.requestDevice({ filters: [{ vendorId: VID, productId: PID }] });
+    await dev.open();
+    if (!dev.configuration) await dev.selectConfiguration(1);
+    // the vendor (WebUSB) interface is the one with class 0xFF (interface 7 in USB profile "headset", 4 in "app")
+    const itf = dev.configuration.interfaces.find(i => i.alternates.some(a => a.interfaceClass === 0xFF));
+    if (!itf) throw new Error('no vendor interface on this device');
+    await dev.claimInterface(itf.interfaceNumber);
+    const alt = itf.alternate;
+    const epIn = alt.endpoints.find(e => e.direction === 'in').endpointNumber;
+    const epOut = alt.endpoints.find(e => e.direction === 'out').endpointNumber;
+    let open = true;
+    link = {
+      kind: 'usb',
+      send: (type, bytes) => dev.transferOut(epOut, encodeFrame(type, bytes)),
+      close: async () => { open = false; try { await dev.close(); } catch (e) {} },
+    };
+    const prof = dev.configuration.interfaces.some(i => i.alternates.some(a => a.interfaceClass === 0x01)) ? 'headset' : 'app';
+    setConn(`connected ${dev.productName || 'qrpico'} ${dev.serialNumber || ''} (USB profile ${prof})`, 'ok');
+    (async () => {
+      while (open) {
+        try {
+          const r = await dev.transferIn(epIn, 4096);
+          if (r.data && r.data.byteLength) parser.push(new Uint8Array(r.data.buffer, r.data.byteOffset, r.data.byteLength));
+        } catch (e) { if (open) { log('USB: ' + e.message); setConn('disconnected', 'warn'); } open = false; }
+      }
+    })();
+    await cmd('stream on');
+    await cmd('rx stats');
+  } catch (e) { log('connect: ' + e.message); }
+}
+navigator.usb && navigator.usb.addEventListener('disconnect', () => { setConn('disconnected', 'warn'); if (link && link.kind === 'usb') link = null; });
+// the board comes back (replug, `usb profile` re-enumeration): reconnect without the chooser if it was ours
+navigator.usb && navigator.usb.addEventListener('connect', async e => {
+  if (link || e.device.vendorId !== VID || e.device.productId !== PID) return;
+  log('board is back on USB: reconnecting');
+  await connectUsb(e.device); afterConnect();
+});
+
+// ---------------------------------------------------------------- demo device (same frames, simulated)
+function loPlan(wanted, cur, forceRef = 0) {   // firmware/src/clocks/lo_plan.c rule, 25 MHz crystal
+  const X = 25e6, lo = 3000, hi = 38000, centre = (lo + hi) / 2;
+  const evalS = s => { const f = X * s.fb / (s.r * s.p1 * s.p2 * 2 * s.n); return { ...s, f, off: wanted - f, vco: X * s.fb / s.r }; };
+  if (cur) { const e = evalS(cur); if (Math.abs(e.off) >= lo && Math.abs(e.off) <= hi && (!forceRef || cur.r === forceRef)) return e; }
+  let best = null;
+  const better = (a, b) => a.r !== b.r ? a.r < b.r : a.fb !== b.fb ? a.fb > b.fb :
+    Math.abs(Math.abs(a.off) - centre) !== Math.abs(Math.abs(b.off) - centre) ? Math.abs(Math.abs(a.off) - centre) < Math.abs(Math.abs(b.off) - centre) :
+    a.f !== b.f ? a.f < b.f : a.n < b.n;
+  for (let r = 1; X / r >= 5e6; r++) {
+    if (forceRef && r !== forceRef) continue;
+    for (let fb = 16; fb <= 320; fb++) {
+      const vco = X * fb / r; if (vco < 750e6 || vco > 1600e6) continue;
+      for (let p1 = 1; p1 <= 7; p1++) for (let p2 = 1; p2 <= p1; p2++) {
+        const out = vco / (p1 * p2); if (out > 150e6) continue;
+        const n0 = Math.max(1, Math.ceil(out / (2 * (wanted + hi)))), n1 = Math.min(63, Math.floor(out / (2 * (wanted - hi))));
+        for (let n = n0; n <= n1; n++) {
+          const e = evalS({ r, fb, p1, p2, n });
+          if (Math.abs(e.off) < lo || Math.abs(e.off) > hi) continue;
+          if (!best || better(e, best)) best = e;
+        }
+      }
+    }
+  }
+  return best;
+}
+function startDemo() {
+  if (link) link.close();
+  const st = { wanted: 14074000, mode: 1, source: 1, running: 1, lo: null, avg: null, seq: 0, t1: [1000, -40], t2: [12000, -70],
+               tx: 0, reason: 0, src: 0, txT0: 0, ka: 0, timeout: 180, loop: false, audio: null };
+  // simplified src/control/txctl.c: band / mode check, keepalive 1 s, time-out
+  const inBand = (lo, hi) => [[28e6, 29.7e6], [14e6, 14.35e6], [7e6, 7.2e6]].some(([a, b]) => lo >= a && hi <= b);
+  const txCheck = () => (st.mode !== 1 && st.mode !== 2) ? 5 :
+    !inBand(st.mode === 1 ? st.wanted : st.wanted - 3000, st.mode === 1 ? st.wanted + 3000 : st.wanted) ? 4 : 0;
+  const txEnd = r => { if (st.tx) { st.tx = 3; st.reason = r; setTimeout(() => { st.tx = 0; }, 27); } };
+  st.lo = loPlan(st.wanted, null);
+  // stations at fixed RF frequencies (FT8 group, CW, a broadcast-like carrier) plus the test tones
+  const stations = [];
+  for (let i = 0; i < 9; i++) stations.push({ f: 14074000 + 300 + i * 290, w: 50, db: -95 + 18 * Math.sin(i * 1.7), ft8: true });
+  stations.push({ f: 14060000, w: 3, db: -80 }, { f: 14095600, w: 1200, db: -88 }, { f: 14101000, w: 3, db: -72 });
+  const N = 1024, bin = 93750 / N;
+  let timer, rnd = 1;
+  const rand = () => { rnd = (rnd * 1664525 + 1013904223) >>> 0; return rnd / 4294967296; };
+  const noise = () => -10 * Math.log10(-Math.log(rand() + 1e-12));   // exponential power in dB around 0
+  function frame() {
+    const fLo = st.lo.f, db = new Float32Array(N);
+    const p = new Float64Array(N);
+    for (let k = 0; k < N; k++) {
+      const df = (k - N / 2) * bin;
+      let pw = Math.pow(10, (-122 + 3 * Math.exp(-Math.abs(df) / 2500)) / 10);     // floor + 1/f hump
+      p[k] = pw * Math.pow(10, noise() / 10 * 0.6);
+    }
+    const add = (f, w, lvl) => {
+      for (let k = 0; k < N; k++) {
+        const x = (fLo + (k - N / 2) * bin - f) / Math.max(w, bin * 0.9);
+        p[k] += Math.pow(10, lvl / 10) * Math.exp(-x * x * 2);
+      }
+    };
+    const t = performance.now() / 1000;
+    for (const s of stations) {
+      const lvl = s.ft8 ? s.db + (Math.floor(t / 15 + s.f) % 2 ? 0 : -60) : s.db;
+      add(s.f, s.w, lvl);
+      add(2 * fLo - s.f, s.w, lvl - 35);                   // I/Q image, uncalibrated
+    }
+    if (st.source === 1) { add(st.wanted + st.t1[0], 3, st.t1[1]); add(st.wanted + st.t2[0], 3, st.t2[1]); }
+    // txmon loop: the microphone level as a DSB signal around the tuned frequency
+    if (st.loop && TXA.levelDb > -90) { add(st.wanted - 1300, 900, TXA.levelDb - 25); add(st.wanted + 1300, 900, TXA.levelDb - 25); }
+    if (st.tx === 2) {
+      if (st.src === 1 && performance.now() - st.ka > 1000) txEnd(2);
+      else if (performance.now() - st.txT0 > st.timeout * 1000) txEnd(3);
+    }
+    if (!st.avg) st.avg = p; else for (let k = 0; k < N; k++) st.avg[k] = 0.5 * st.avg[k] + 0.5 * p[k];
+    const u8 = new Uint8Array(36 + N), v = new DataView(u8.buffer);
+    v.setUint32(0, ++st.seq, true); v.setBigInt64(4, BigInt(Math.round(fLo * 1000)), true); v.setBigInt64(12, BigInt(st.wanted), true);
+    v.setFloat32(20, bin, true); v.setFloat32(24, -140, true); v.setFloat32(28, 0.5, true); v.setUint16(32, N, true);
+    for (let k = 0; k < N; k++) {
+      let d = 10 * Math.log10(st.avg[k]);
+      const df = Math.abs((k - N / 2) * bin);
+      if (df > 42600) d -= (df - 42600) / 150;            // decimation-filter edge
+      u8[36 + k] = Math.max(0, Math.min(255, Math.round((d + 140) / 0.5)));
+    }
+    parser.push(encodeFrame(T_SPECTRUM, u8));
+    if (st.seq % 5 === 0) {
+      const s = new Uint8Array(116), w = new DataView(s.buffer);
+      w.setBigInt64(0, BigInt(st.wanted), true); w.setBigInt64(8, BigInt(Math.round(fLo * 1000)), true);
+      w.setBigInt64(16, BigInt(Math.round((st.wanted - fLo) * 1000)), true);
+      s.set([st.mode, st.source, st.running, st.wanted < 8e6 ? 3 : st.wanted < 20e6 ? 2 : 1, 1, 0, 0, 0], 24);
+      [880, 1210, 2400, 3, 0, 0].forEach((x, i) => w.setUint32(32 + 4 * i, x, true));
+      [0.002, 0.0, 0.648, 0.21, 0.001, 25.3].forEach((x, i) => w.setFloat32(56 + 4 * i, x, true));
+      s[31] = 2;
+      w.setFloat32(80, TXA.levelDb + 3, true); w.setFloat32(84, TXA.levelDb, true);
+      s[104] = (TXA.ctx ? 1 : 0) | (st.loop ? 2 : 0); s[105] = st.tx; s[106] = st.reason; s[107] = st.src;
+      w.setUint32(108, st.tx ? Math.round(performance.now() - st.txT0) : 0, true); w.setUint16(112, st.timeout, true); s[114] = 1;
+      parser.push(encodeFrame(T_STATUS, s));
+    }
+  }
+  // AUDIO frames like src/usb/usb_proto.c: 12 kS/s mono, a weak 1 kHz tone in noise in USB / LSB
+  function audioFrames() {
+    const A12 = st.audio, due = Math.floor((performance.now() - A12.t0) / 1000 * 12000 * (1 + 300e-6));
+    while (due - A12.idx >= 96) {
+      const n = Math.min(192, due - A12.idx), pl = new Uint8Array(8 + 2 * n), v = new DataView(pl.buffer);
+      v.setUint32(0, A12.idx >>> 0, true); v.setUint16(4, n, true); v.setUint16(6, due - A12.idx - n, true);
+      for (let i = 0; i < n; i++, A12.idx++) {
+        const x = st.mode ? 0.05 * Math.sin(2 * Math.PI * 1000 * A12.idx / 12000) + 0.03 * (rand() - 0.5) : 0;
+        v.setInt16(8 + 2 * i, Math.round(x * 32767), true);
+      }
+      parser.push(encodeFrame(T_AUDIO, pl));
+    }
+  }
+  function handle(line) {
+    const a = line.trim().split(/\s+/);
+    let out = '';
+    if (a[0] === 'tune' && a[1]) {
+      const f = Number(a[1]), prev = st.lo;
+      const lo = loPlan(f, st.lo); if (!lo) { out = 'no LO setting in the window\n'; }
+      else {
+        st.wanted = f; st.lo = lo;
+        const changed = !prev || prev.r !== lo.r || prev.fb !== lo.fb || prev.p1 !== lo.p1 || prev.p2 !== lo.p2 || prev.n !== lo.n;
+        if (changed) st.avg = null;
+        out = `tuned ${f} Hz: LO ${lo.f.toFixed(3)} Hz, NCO offset ${(f - lo.f >= 0 ? '+' : '') + (f - lo.f).toFixed(3)} Hz` +
+              (changed ? ' (PLL changed, audio muted 26 ms)' : ' (same PLL, NCO only)') + ` [REFDIV ${lo.r} FBDIV ${lo.fb} POSTDIV ${lo.p1}/${lo.p2} n ${lo.n}]\n`;
+      }
+    } else if (a[0] === 'mode') { st.mode = { iq: 0, usb: 1, lsb: 2 }[a[1]] ?? st.mode; out = `mode ${a[1]}\n`; }
+    else if (a[0] === 'rx' && a[1] === 'start') { st.running = 1; st.source = a[2] === 'test' ? 1 : 0; out = `RX chain running, source ${a[2] === 'test' ? 'test' : 'PCM1808 (demo)'}\n`; }
+    else if (a[0] === 'rx' && a[1] === 'stop') { st.running = 0; out = 'RX chain stopped\n'; }
+    else if (a[0] === 'rx' && a[1] === 'test') { st.t1 = [Number(a[2]) - st.wanted, Number(a[3])]; if (a[4]) st.t2 = [Number(a[4]) - st.wanted, Number(a[5])]; out = 'test source set\n'; }
+    else if (a[0] === 'stream' && a[1] === 'audio') {
+      clearInterval(st.audio && st.audio.timer); st.audio = null;
+      if (a[2] === 'on') { st.audio = { t0: performance.now(), idx: 0 }; st.audio.timer = setInterval(audioFrames, 10); }
+      out = `stream audio ${a[2]}\n`;
+    }
+    else if (a[0] === 'stream') out = `stream ${a[1]}\n`;
+    else if (a[0] === 'ptt' && a[1] === 'ka') { st.ka = performance.now(); return; }
+    else if (a[0] === 'ptt' && a[1] === 'on') {
+      const r = st.tx === 3 ? 9 : txCheck();
+      if (!r && !st.tx) { st.tx = 1; st.src = 1; st.reason = 0; st.txT0 = st.ka = performance.now(); setTimeout(() => { if (st.tx === 1) st.tx = 2; }, 11); }
+      if (r) st.reason = r;
+      out = `ptt on: ${r ? txReasons[r] : 'ok'}\n`;
+    } else if (a[0] === 'ptt' && a[1] === 'off') { txEnd(1); out = 'ptt off: ok\n'; }
+    else if (a[0] === 'txmon') { st.loop = a[1] === 'loop'; out = `txmon ${st.loop ? 'loop' : 'off'}\n`; }
+    else out = `(demo) ${line}: not simulated\n`;
+    parser.push(encodeFrame(T_TEXT, enc.encode(out), 1));
+  }
+  link = {
+    kind: 'demo',
+    send: async (type, bytes) => { if (type === T_CMD) setTimeout(() => handle(dec.decode(bytes)), 5); },
+    close: () => { clearInterval(timer); clearInterval(st.audio && st.audio.timer); },
+  };
+  timer = setInterval(frame, 1000 / 23);
+  setConn('demo (simulated device)', 'warn');
+  cmd(`tune ${st.wanted}`);
+}
+
+// ---------------------------------------------------------------- UI state and rendering
+const $ = id => document.getElementById(id);
+const S = { spec: null, status: null, wanted: 14074000, mode: 'usb', fLoWf: null, txActive: false };
+const modeNames = ['iq', 'usb', 'lsb'], bandNames = ['–', '10 m', '20 m', '40 m'];
+// settings kept in this browser (localStorage may be unavailable: then nothing is remembered)
+const store = {
+  get(k, d) { try { const v = localStorage.getItem('qrpico-' + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem('qrpico-' + k, JSON.stringify(v)); } catch (e) {} },
+};
+
+function log(t) { const l = $('log'); l.textContent += t.endsWith('\n') ? t : t + '\n'; if (l.textContent.length > 20000) l.textContent = l.textContent.slice(-15000); l.scrollTop = l.scrollHeight; }
+function setConn(t, cls) { const c = $('st-conn'); c.textContent = t; c.className = 'chip ' + (cls || ''); }
+async function cmd(line, quiet = false) { if (!link) { if (!quiet) log('not connected'); return; } if (!quiet) log('> ' + line); await link.send(T_CMD, enc.encode(line)); }
+
+function onFrame(type, flags, p) {
+  if (type === T_TEXT) {
+    const t = dec.decode(p); log(t);
+    if (/^ptt on: /.test(t) && !/^ptt on: ok/.test(t) && TXA.ptt) setPtt(false, true);   // refused by the board
+  }
+  else if (type === T_SPECTRUM) { S.spec = parseSpectrum(p); if (!S.status) S.wanted = S.spec.wanted; drawSpectrum(); pushWaterfall(); }
+  else if (type === T_STATUS) { S.status = parseStatus(p); updateStatus(); txRate(); }
+  else if (type === T_AUDIO) rxAudioFrame(p);
+}
+
+const fmtHz = f => (f / 1e6).toFixed(6);
+function updateStatus() {
+  const s = S.status;
+  S.wanted = s.wanted;
+  if (document.activeElement !== $('freq')) $('freq').value = fmtHz(s.wanted);
+  $('st-lo').textContent = `LO ${fmtHz(s.fLo)} MHz, offset ${(s.offset / 1000).toFixed(3)} kHz`;
+  const load = s.blkAvg / 2731 * 100;
+  const ld = $('st-load'); ld.textContent = `core 1 ${load.toFixed(0)} %`; ld.className = 'chip ' + (load > 80 ? 'warn' : 'ok');
+  const au = $('st-audio'); au.textContent = s.audio ? 'USB audio streaming' : 'USB audio idle'; au.className = 'chip ' + (s.audio ? 'ok' : '');
+  const rows = [
+    ['tuned', fmtHz(s.wanted) + ' MHz'], ['LO', fmtHz(s.fLo) + ' MHz'], ['NCO offset', (s.offset >= 0 ? '+' : '') + s.offset.toFixed(1) + ' Hz'],
+    ['mode', modeNames[s.mode] || '?'], ['source', s.source ? 'test' : 'PCM1808'], ['chain', s.running ? 'running' : 'stopped'],
+    ['band switch', bandNames[s.band] || '?'], ['RX_EN / PA domain', `${s.rxEn ? 'on' : 'off'} / ${s.paOn ? 'ON' : 'off'}`],
+    ['block avg / max', `${s.blkAvg} / ${s.blkMax} µs`], ['audio FIFO', `${s.fifo} frames`], ['dropped / ADC overruns', `${s.dropped} / ${s.overruns}`],
+    ['PA_TEMP', s.paC.toFixed(1) + ' °C'], ['CC_SENSE', s.adc[3].toFixed(3) + ' V'],
+    ...(s.version >= 2 ? [['TX audio', `${s.txStreaming ? 'streaming' : 'idle'}, ${s.txRms.toFixed(0)} dBFS rms`],
+                          ['TX ring / underruns', `${s.txRing} / ${s.txUnder + s.txUsbUnder}`]] : []),
+  ];
+  $('status').tBodies[0].innerHTML = rows.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('');
+  S.mode = modeNames[s.mode] || 'usb';
+  document.querySelectorAll('[data-mode]').forEach(b => b.classList.toggle('active', b.dataset.mode === S.mode));
+  document.querySelectorAll('[data-band]').forEach(b => b.classList.toggle('active', Number(b.dataset.band) === s.band));
+  $('rxbtn').textContent = s.running ? 'RX stop' : 'RX start';
+  $('rxbtn').classList.toggle('active', !!s.running);
+  if (document.activeElement !== $('source')) $('source').value = s.source ? 'test' : 'adc';
+  if (s.version >= 2) updateTxStatus(s);
+}
+function updateTxStatus(s) {
+  const was = S.txActive;
+  S.txActive = s.txState !== 0;
+  if (was !== S.txActive) applyAudio();
+  const chip = $('st-tx');
+  if (S.txActive) {
+    chip.textContent = `${txStates[s.txState]} ${pttSources[s.pttSrc]} ${Math.floor(s.txElapsed / 1000)} / ${s.txTimeout} s${s.dryRun ? ' (dry run)' : ''}`;
+    chip.className = 'chip tx';
+  } else {
+    chip.textContent = s.txReason > 1 ? `RX (last TX / request: ${txReasons[s.txReason]})` : "RX";
+    chip.className = 'chip' + (s.txReason > 1 ? ' warn' : '');
+  }
+  if (TXA.ptt && S.txActive) TXA.sawActive = true;
+  // the board ended a TX that the app still holds (keepalive, band, time-out ...): release locally
+  if (TXA.ptt && TXA.sawActive && !S.txActive && s.txReason > 1) {
+    log(`TX ended by the board: ${txReasons[s.txReason]}`);
+    setPtt(false, true);
+  }
+  $('blevel').style.width = Math.max(0, Math.min(100, (s.txRms + 60) / 60 * 100)) + '%';
+  $('txloop').checked = s.txLoop;
+  if (s.dryRun !== S.dryRun) {
+    S.dryRun = s.dryRun;
+    $('txpwrv').title = s.dryRun ? 'This firmware build runs TX as a dry run: nothing is transmitted.' : '';
+    if (s.dryRun) log('TX: this firmware build runs PTT as a dry run (no RF).');
+  }
+}
+
+function css(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+function fit(canvas) {
+  const dpr = window.devicePixelRatio || 1, w = Math.round(canvas.clientWidth * dpr), h = Math.round(canvas.clientHeight * dpr);
+  if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; return true; }
+  return false;
+}
+function spanOf(sp) { const n = sp.db.length, half = n / 2 * sp.binHz; return { f0: sp.fLo - half, f1: sp.fLo + half, n }; }
+function xOf(f, sp, w) { const s = spanOf(sp); return (f - s.f0) / (s.f1 - s.f0) * w; }
+function fOf(x, sp, w) { const s = spanOf(sp); return s.f0 + x / w * (s.f1 - s.f0); }
+function displayDb(sp) {
+  const d = Float32Array.from(sp.db), c = d.length / 2;
+  if ($('hidelo').checked) d[c] = 0.5 * (d[c - 1] + d[c + 1]);
+  return d;
+}
+function passband(sp) {
+  const w = S.wanted, m = S.status ? S.status.mode : modeNames.indexOf(S.mode);
+  if (m === 1) return [w + 100, w + 2900];
+  if (m === 2) return [w - 2900, w - 100];
+  return [w - 20000, w + 20000];
+}
+
+function drawSpectrum() {
+  const c = $('spec'), sp = S.spec; if (!sp) return; fit(c);
+  const g = c.getContext('2d'), W = c.width, H = c.height, dpr = window.devicePixelRatio || 1;
+  const lo = Number($('dbmin').value), hi = Number($('dbmax').value);
+  const yOf = d => H - (d - lo) / (hi - lo) * H;
+  g.fillStyle = css('--spec-bg'); g.fillRect(0, 0, W, H);
+  // unreliable span edges (beyond the PCM1808 passband)
+  g.fillStyle = css('--edge');
+  const e0 = xOf(sp.fLo - 42600, sp, W), e1 = xOf(sp.fLo + 42600, sp, W);
+  g.fillRect(0, 0, e0, H); g.fillRect(e1, 0, W - e1, H);
+  // grid: 10 dB and 10 kHz
+  g.strokeStyle = css('--spec-grid'); g.lineWidth = 1; g.font = `${11 * dpr}px ui-monospace, monospace`; g.fillStyle = '#7d8aa0';
+  for (let d = Math.ceil(lo / 10) * 10; d <= hi; d += 10) {
+    const y = Math.round(yOf(d)) + 0.5; g.beginPath(); g.moveTo(0, y); g.lineTo(W, y); g.stroke();
+    if (y > 14 * dpr && y < H - 18 * dpr) g.fillText(d + ' dBFS', 4 * dpr, y - 3 * dpr);   // keep clear of the axis labels
+  }
+  const s = spanOf(sp);
+  // frequency labels at 10, 20 or 50 kHz so that they do not overlap (~70 px per label)
+  const pxPerHz = W / (s.f1 - s.f0), stepHz = [10000, 20000, 50000].find(st => st * pxPerHz >= 70 * dpr) || 50000;
+  for (let f = Math.ceil(s.f0 / 10000) * 10000; f < s.f1; f += 10000) {
+    const x = Math.round(xOf(f, sp, W)) + 0.5; g.beginPath(); g.moveTo(x, 0); g.lineTo(x, H); g.stroke();
+    if (Math.round(f) % stepHz === 0) g.fillText((f / 1e6).toFixed(3), x + 3 * dpr, H - 4 * dpr);
+  }
+  // passband of the current mode
+  const [p0, p1] = passband(sp);
+  g.fillStyle = css('--pass'); g.fillRect(xOf(p0, sp, W), 0, xOf(p1, sp, W) - xOf(p0, sp, W), H);
+  // trace
+  const d = displayDb(sp);
+  g.beginPath();
+  for (let k = 0; k < d.length; k++) { const x = (k + 0.5) / d.length * W, y = yOf(d[k]); k ? g.lineTo(x, y) : g.moveTo(x, y); }
+  g.strokeStyle = css('--spec-line'); g.lineWidth = 1.2 * dpr; g.stroke();
+  g.lineTo(W, H); g.lineTo(0, H); g.closePath(); g.fillStyle = css('--spec-fill'); g.fill();
+  // markers: f_LO (dashed) and the tuned frequency
+  const xl = xOf(sp.fLo, sp, W), xt = xOf(S.wanted, sp, W);
+  g.setLineDash([4 * dpr, 4 * dpr]); g.strokeStyle = css('--lo'); g.lineWidth = dpr; g.beginPath(); g.moveTo(xl, 0); g.lineTo(xl, H); g.stroke();
+  g.setLineDash([]); g.strokeStyle = css('--tune'); g.lineWidth = 1.5 * dpr; g.beginPath(); g.moveTo(xt, 0); g.lineTo(xt, H); g.stroke();
+  g.fillStyle = css('--lo'); g.fillText('f_LO', xl + 3 * dpr, 14 * dpr);
+  // power in the receive passband (sum of the bins, smoothed)
+  let pw = 0;
+  for (let k = 0; k < sp.db.length; k++) { const f = sp.fLo + (k - sp.db.length / 2) * sp.binHz; if (f >= p0 && f <= p1) pw += Math.pow(10, d[k] / 10); }
+  if (pw > 0) {
+    const v = 10 * Math.log10(pw);
+    S.sig = S.sig === undefined ? v : S.sig + 0.3 * (v - S.sig);
+    $('sig').textContent = `${S.sig.toFixed(1)} dBFS`;
+  }
+}
+
+// waterfall in RF coordinates: when f_LO moves, the old rows shift so that frequencies stay aligned
+const lut = (() => {
+  const stops = [[0, 0, 4, 20], [0.25, 30, 30, 120], [0.5, 30, 140, 160], [0.75, 230, 200, 40], [1, 255, 255, 230]];
+  const t = new Uint8ClampedArray(256 * 3);
+  for (let i = 0; i < 256; i++) {
+    const x = i / 255; let j = 0; while (j < stops.length - 2 && x > stops[j + 1][0]) j++;
+    const [a, b] = [stops[j], stops[j + 1]], u = (x - a[0]) / (b[0] - a[0]);
+    for (let c = 0; c < 3; c++) t[3 * i + c] = a[c + 1] + (b[c + 1] - a[c + 1]) * u;
+  }
+  return t;
+})();
+const WF = { acc: null, nacc: 0, lo: -125, hi: -75, tick: 0, first: true };
+function wfRange(row) {
+  if (!$('wfauto').checked) return [Number($('wfmin').value), Number($('wfmax').value)];
+  // auto: floor a little below the median, top just above the strongest 0.5 % of the bins, smoothed
+  const v = Array.from(row).sort((a, b) => a - b);
+  const lo = v[v.length >> 1] - 6, hi = Math.max(lo + 30, v[Math.floor(v.length * 0.995)] + 3);
+  const a = WF.first ? 1 : 0.08; WF.first = false;
+  WF.lo += a * (lo - WF.lo); WF.hi += a * (hi - WF.hi);
+  if (document.activeElement !== $('wfmin')) $('wfmin').value = Math.round(WF.lo);
+  if (document.activeElement !== $('wfmax')) $('wfmax').value = Math.round(WF.hi);
+  return [WF.lo, WF.hi];
+}
+function pushWaterfall() {
+  const sp = S.spec, d = displayDb(sp), every = Number($('wfspeed').value);
+  // average `every` spectra (as power) into one row
+  if (!WF.acc || WF.acc.length !== d.length) { WF.acc = new Float64Array(d.length); WF.nacc = 0; }
+  for (let k = 0; k < d.length; k++) WF.acc[k] += Math.pow(10, d[k] / 10);
+  if (++WF.nacc < every) { drawWfOverlay(); return; }
+  const row = Float32Array.from(WF.acc, x => 10 * Math.log10(x / WF.nacc));
+  WF.acc.fill(0); WF.nacc = 0;
+
+  const c = $('wf'), resized = fit(c), g = c.getContext('2d'), W = c.width, H = c.height, dpr = window.devicePixelRatio || 1;
+  if (resized || S.fLoWf === null) { g.fillStyle = css('--spec-bg'); g.fillRect(0, 0, W, H); }
+  const rowH = Math.max(1, Math.round(dpr));
+  // keep RF alignment when f_LO moved: shift the history sideways
+  const dx = S.fLoWf === null ? 0 : -(sp.fLo - S.fLoWf) / (spanOf(sp).f1 - spanOf(sp).f0) * W;
+  g.drawImage(c, 0, 0, W, H - rowH, Math.round(dx), rowH, W, H - rowH);
+  if (dx) { g.fillStyle = css('--spec-bg'); if (dx > 0) g.fillRect(0, rowH, Math.ceil(dx), H); else g.fillRect(W + Math.floor(dx), rowH, -Math.floor(dx), H); }
+  S.fLoWf = sp.fLo;
+  const [lo, hi] = wfRange(row);
+  const img = g.createImageData(W, rowH);
+  for (let x = 0; x < W; x++) {
+    const k = Math.min(row.length - 1, Math.floor(x / W * row.length));
+    const v = Math.max(0, Math.min(255, Math.round((row[k] - lo) / (hi - lo) * 255)));
+    for (let r = 0; r < rowH; r++) { const o = 4 * (r * W + x); img.data[o] = lut[3 * v]; img.data[o + 1] = lut[3 * v + 1]; img.data[o + 2] = lut[3 * v + 2]; img.data[o + 3] = 255; }
+  }
+  g.putImageData(img, 0, 0);
+  // time marks: a tick and the time at every 10 s (or 15 s for FT8 periods); they scroll with the rows
+  const per = Number($('wftick').value) * 1000, now = Date.now();
+  if (per && Math.floor(now / per) !== WF.tick) {
+    WF.tick = Math.floor(now / per);
+    g.fillStyle = 'rgba(230,236,245,0.85)'; g.fillRect(0, 0, 10 * dpr, rowH);
+    g.font = `${10 * dpr}px ui-monospace, monospace`; g.textBaseline = 'top';
+    g.fillText(new Date(now).toTimeString().slice(0, 8), 12 * dpr, rowH + dpr);
+  }
+  drawWfScale(lo, hi);
+  drawWfOverlay();
+}
+function drawWfScale(lo, hi) {
+  const c = $('wfscale'); fit(c);
+  const g = c.getContext('2d'), W = c.width, H = c.height, dpr = window.devicePixelRatio || 1;
+  const img = g.createImageData(W, H);
+  for (let y = 0; y < H; y++) {
+    const v = Math.round((1 - y / (H - 1)) * 255);
+    for (let x = 0; x < W; x++) { const o = 4 * (y * W + x); img.data[o] = lut[3 * v]; img.data[o + 1] = lut[3 * v + 1]; img.data[o + 2] = lut[3 * v + 2]; img.data[o + 3] = 255; }
+  }
+  g.putImageData(img, 0, 0);
+  g.font = `${9 * dpr}px ui-monospace, monospace`; g.textAlign = 'center';
+  g.fillStyle = '#000'; g.textBaseline = 'top'; g.fillText(String(Math.round(hi)), W / 2, 2 * dpr);
+  g.fillStyle = '#fff'; g.textBaseline = 'bottom'; g.fillText(String(Math.round(lo)), W / 2, H - 2 * dpr);
+}
+// tuned frequency, passband and f_LO over the waterfall, on their own canvas so that they do not burn in
+function drawWfOverlay() {
+  const c = $('wfo'), sp = S.spec; fit(c); if (!sp) return;
+  const g = c.getContext('2d'), W = c.width, H = c.height, dpr = window.devicePixelRatio || 1;
+  g.clearRect(0, 0, W, H);
+  const [p0, p1] = passband(sp), x0 = xOf(p0, sp, W), x1 = xOf(p1, sp, W);
+  g.fillStyle = 'rgba(255,92,92,0.10)'; g.fillRect(x0, 0, x1 - x0, H);
+  const xl = xOf(sp.fLo, sp, W), xt = xOf(S.wanted, sp, W);
+  g.setLineDash([4 * dpr, 6 * dpr]); g.strokeStyle = css('--lo'); g.globalAlpha = 0.7; g.lineWidth = dpr;
+  g.beginPath(); g.moveTo(xl, 0); g.lineTo(xl, H); g.stroke();
+  g.setLineDash([]); g.globalAlpha = 0.9; g.strokeStyle = css('--tune'); g.lineWidth = 1.5 * dpr;
+  g.beginPath(); g.moveTo(xt, 0); g.lineTo(xt, H); g.stroke(); g.globalAlpha = 1;
+}
+
+// splitter between spectrum and waterfall
+(() => {
+  const bar = $('split'), box = bar.parentElement;
+  let y0 = null, h0 = 0;
+  const setH = h => {
+    h = Math.round(Math.max(110, Math.min(h, box.clientHeight - 150)));
+    document.documentElement.style.setProperty('--spec-h', h + 'px');
+    try { localStorage.setItem('qrpico-spec-h', String(h)); } catch (e) {}
+    S.fLoWf = null; drawSpectrum(); drawWfOverlay();
+  };
+  bar.addEventListener('pointerdown', e => { y0 = e.clientY; h0 = $('spec').clientHeight; bar.setPointerCapture(e.pointerId); bar.classList.add('drag'); });
+  bar.addEventListener('pointermove', e => { if (y0 !== null) setH(h0 + e.clientY - y0); });
+  const end = () => { y0 = null; bar.classList.remove('drag'); };
+  bar.addEventListener('pointerup', end); bar.addEventListener('pointercancel', end);
+  bar.addEventListener('dblclick', () => setH(240));
+  try { const h = Number(localStorage.getItem('qrpico-spec-h')); if (h) document.documentElement.style.setProperty('--spec-h', h + 'px'); } catch (e) {}
+})();
+
+// ---------------------------------------------------------------- RX audio: WebUSB stream (default) or "qrpico RX" input -> output device
+const A = { ctx: null, stream: null, gain: null, an: null, node: null, raf: 0, devs: null, stats: null };
+// AudioWorklet player for the 12 kS/s AUDIO frames. Jitter buffer, then a polyphase windowed-sinc
+// interpolator (16 taps, 128 phases, cut-off 5 kHz) to the context rate. The step follows the
+// board's crystal: the smoothed buffer level against the target moves the ratio (P control,
+// at most +-0.2 %, i.e. 3.5 cents) - the job the ISO feedback endpoints do for the UAC2 path.
+// Gaps in the running sample index become silence; an empty buffer refills to the target first.
+const RX_WORKLET = `
+class QrpicoRx extends AudioWorkletProcessor {
+  constructor(o) {
+    super();
+    const p = o.processorOptions;
+    this.fsIn = p.fsIn; this.step0 = p.fsIn / sampleRate; this.target = p.targetMs * p.fsIn / 1000;
+    this.N = 1 << 15; this.buf = new Float32Array(this.N); this.w = 0; this.r = 0;
+    this.playing = false; this.lvl = this.target; this.adj = 0; this.next = -1;
+    this.under = 0; this.gaps = 0; this.lost = 0; this.drops = 0; this.blocks = 0;
+    const T = 16, P = 128, fc = p.cutoff / p.fsIn;
+    this.T = T; this.P = P; this.h = new Float32Array((P + 1) * T);
+    for (let ph = 0; ph <= P; ph++) {
+      let sum = 0;
+      for (let k = 0; k < T; k++) {
+        const d = T / 2 - 1 - k + ph / P, a = 2 * Math.PI * fc * d;   // distance of tap k from the read position
+        const sinc = Math.abs(a) < 1e-9 ? 1 : Math.sin(a) / a, u = d / (T / 2);
+        const win = Math.abs(u) >= 1 ? 0 : 0.42 + 0.5 * Math.cos(Math.PI * u) + 0.08 * Math.cos(2 * Math.PI * u);
+        this.h[ph * T + k] = sinc * win; sum += sinc * win;
+      }
+      for (let k = 0; k < T; k++) this.h[ph * T + k] /= sum;        // unity gain at DC for every phase
+    }
+    this.port.onmessage = e => this.push(e.data.first, e.data.s);
+  }
+  push(first, s) {
+    if (this.next >= 0) {
+      const d = (first - this.next) | 0;                               // u32 index, wraps
+      if (d < 0 || d > this.fsIn) { this.next = -1; }                  // stream restarted: resynchronise
+      else if (d > 0) { this.gaps++; this.lost += d; for (let i = 0; i < d; i++) this.buf[this.w++ % this.N] = 0; }
+    }
+    for (let i = 0; i < s.length; i++) this.buf[this.w++ % this.N] = s[i] / 32768;
+    this.next = (first + s.length) >>> 0;
+    if (this.w - this.r > this.N - 4096) { this.r = this.w - this.target; this.drops++; }
+  }
+  process(inputs, outputs) {
+    const out = outputs[0][0], T = this.T, P = this.P, h = this.h, N = this.N, b = this.buf;
+    let level = this.w - this.r;
+    if (!this.playing && level >= this.target + T) { this.playing = true; this.lvl = level; }
+    if (this.playing && level > 3 * this.target) { this.r = this.w - this.target; this.drops++; level = this.target; }
+    if (this.playing) {
+      this.lvl += 0.002 * (level - this.lvl);                         // ~1.3 s at 375 blocks/s
+      this.adj = Math.max(-0.002, Math.min(0.002, 0.01 * (this.lvl - this.target) / this.target));
+    }
+    const step = this.step0 * (1 + this.adj);
+    for (let j = 0; j < out.length; j++) {
+      if (!this.playing) { out[j] = 0; continue; }
+      const i = Math.floor(this.r);
+      if (this.w - i < T / 2 + 1) { this.playing = false; this.under++; out[j] = 0; continue; }
+      const f = (this.r - i) * P, ph = Math.floor(f), t = f - ph, h0 = ph * T, h1 = h0 + T;
+      let y = 0;
+      for (let k = 0, n = i - T / 2 + 1; k < T; k++, n++) y += b[n % N] * (h[h0 + k] + t * (h[h1 + k] - h[h0 + k]));
+      out[j] = y;
+      this.r += step;
+    }
+    if (this.r > 1e9) { const sh = Math.floor(this.r / N) * N; this.r -= sh; this.w -= sh; }   // keep the indices small
+    if (++this.blocks % 188 === 0)
+      this.port.postMessage({ ms: (this.w - this.r) / this.fsIn * 1000, ppm: this.adj * 1e6, under: this.under,
+                              gaps: this.gaps, lost: this.lost, drops: this.drops });
+    return true;
+  }
+}
+registerProcessor('qrpico-rx', QrpicoRx);
+`;
+function rxAudioFrame(p) {
+  if (!A.node) return;
+  const v = new DataView(p.buffer, p.byteOffset, p.byteLength), n = v.getUint16(4, true);
+  const s = new Int16Array(p.buffer.slice(p.byteOffset + 8, p.byteOffset + 8 + 2 * n));   // little endian like the board
+  A.node.port.postMessage({ first: v.getUint32(0, true), s }, [s.buffer]);
+}
+// Device names appear only while the page holds the microphone permission. With a one-time grant
+// (and on file:// pages) it can end when the last stream stops, so the list is taken while the
+// permission stream is still open, and the last list with names is kept (A.devs).
+async function audioDevices() {
+  let ds = await navigator.mediaDevices.enumerateDevices();
+  if (!ds.some(d => d.label)) {
+    const s = await navigator.mediaDevices.getUserMedia({ audio: true });
+    ds = await navigator.mediaDevices.enumerateDevices();
+    s.getTracks().forEach(t => t.stop());
+  }
+  if (ds.some(d => d.label)) A.devs = ds;
+  return ds;
+}
+// The board's audio devices: Windows and macOS show the interface names ("qrpico RX" / "qrpico TX"),
+// Linux (PulseAudio / PipeWire) names them from the USB ID database: "pid.codes Test PID ..." for 1209:0001.
+// Devices in the same group (one USB device) as a matching one belong to the board too.
+const BOARD_RE = /qrpico|pid\.codes test pid|1209:0001/i;
+function boardGroups(ds) { return new Set(ds.filter(d => BOARD_RE.test(d.label) && d.groupId).map(d => d.groupId)); }
+function isBoard(d, ds) { return BOARD_RE.test(d.label) || (d.groupId && d.deviceId !== 'default' && boardGroups(ds).has(d.groupId)); }
+const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+// fill a <select> with devices, keep the user's choice (by id, else by label: ids can change), store it
+function fillSelect(sel, list, firstLabel, key) {
+  const want = sel.value || store.get(key, { id: '', label: '' }).id, wantLabel = store.get(key, { id: '', label: '' }).label;
+  sel.innerHTML = `<option value="">${esc(firstLabel)}</option>` +
+    list.map(d => `<option value="${d.deviceId}">${esc(d.label || d.kind)}</option>`).join('');
+  const byId = list.find(d => d.deviceId === want), byLabel = list.find(d => d.label && d.label === wantLabel);
+  sel.value = (byId || byLabel || { deviceId: '' }).deviceId;
+}
+function remember(sel, key) { const o = sel.selectedOptions[0]; store.set(key, { id: sel.value, label: sel.value ? o.textContent : '' }); }
+async function fillAudioSelects(given) {
+  let ds = given || await navigator.mediaDevices.enumerateDevices();
+  if (ds.some(d => d.label)) A.devs = ds; else if (A.devs) ds = A.devs;   // keep the names once seen
+  const real = ds.filter(d => d.deviceId !== 'default' && d.deviceId !== 'communications');
+  fillSelect($('ain'), real.filter(d => d.kind === 'audioinput' && isBoard(d, ds)), 'WebUSB stream', 'ain');
+  fillSelect($('aout'), real.filter(d => d.kind === 'audiooutput' && !isBoard(d, ds)), 'system default output', 'aout');
+  fillSelect($('mic'), real.filter(d => d.kind === 'audioinput' && !isBoard(d, ds)), '(auto, never the board)', 'mic');
+  fillSelect($('txout'), real.filter(d => d.kind === 'audiooutput' && isBoard(d, ds)), 'WebUSB stream', 'txout');
+  return ds;
+}
+// the system default input may be the board itself (Linux often picks the newest USB audio device)
+function defaultIsBoard(ds) {
+  const def = ds.find(d => d.kind === 'audioinput' && d.deviceId === 'default');
+  return !!def && (BOARD_RE.test(def.label) || boardGroups(ds).has(def.groupId));
+}
+async function fillOutputs() { await fillAudioSelects(); }
+function rxAudioGain() { return ($('amute').checked || S.txActive) ? 0 : Number($('avol').value); }
+function applyAudio() { if (A.gain) A.gain.gain.setTargetAtTime(rxAudioGain(), A.ctx.currentTime, 0.01); }
+async function applySink() {
+  if (!A.ctx) return;
+  if (typeof A.ctx.setSinkId === 'function') {
+    try { await A.ctx.setSinkId($('aout').value || ''); } catch (e) { log('audio output: ' + e.message); }
+  } else if ($('aout').value) log('This browser cannot choose the output device (AudioContext.setSinkId); using the default output.');
+}
+function showRxStats() {
+  const t = A.stats; if (!t) return;
+  $('anote').textContent = `WebUSB stream, 12 kS/s: buffer ${t.ms.toFixed(0)} ms, rate ${t.ppm >= 0 ? '+' : ''}${t.ppm.toFixed(0)} ppm` +
+    (t.under || t.gaps || t.drops ? `, underruns ${t.under}, gaps ${t.gaps} (${t.lost} samples), resets ${t.drops}` : '') + '. Muted while transmitting.';
+}
+function stopListen() {
+  cancelAnimationFrame(A.raf);
+  if (A.stream) A.stream.getTracks().forEach(t => t.stop());
+  if (A.node) { A.node.port.onmessage = null; cmd('stream audio off', true); }
+  if (A.ctx) A.ctx.close();
+  Object.assign(A, { ctx: null, stream: null, gain: null, an: null, node: null, stats: null });
+  $('listen').textContent = 'Listen'; $('listen').classList.add('primary'); $('listen').classList.remove('active'); $('alevel').style.width = '0';
+}
+async function listen() {
+  if (A.ctx) { stopListen(); store.set('listening', false); return; }
+  try {
+    A.ctx = new AudioContext({ latencyHint: 'interactive' });
+    let src;
+    if (!$('ain').value) {
+      // WebUSB stream (also the demo device): AUDIO frames -> worklet player
+      if (!link) throw new Error('connect the board first (the audio comes over WebUSB)');
+      const url = URL.createObjectURL(new Blob([RX_WORKLET], { type: 'application/javascript' }));
+      await A.ctx.audioWorklet.addModule(url); URL.revokeObjectURL(url);
+      A.node = new AudioWorkletNode(A.ctx, 'qrpico-rx', { numberOfInputs: 0, outputChannelCount: [1],
+        processorOptions: { fsIn: 12000, targetMs: 100, cutoff: 5000 } });
+      A.node.port.onmessage = e => { A.stats = e.data; showRxStats(); };
+      src = A.node;
+      await cmd('stream audio on', true);
+      $('anote').textContent = 'WebUSB stream, 12 kS/s' + ($('aout').value ? '' : ' to the system default output') + '. Muted while transmitting.';
+    } else {
+      const ds = await fillAudioSelects(await audioDevices());   // permission, so that the names are known
+      const ins = ds.filter(d => d.kind === 'audioinput' && d.deviceId !== 'default' && isBoard(d, ds));
+      const dev = ins.find(d => d.deviceId === $('ain').value);
+      if (!dev) log('audio inputs seen: ' + ds.filter(d => d.kind === 'audioinput').map(d => `"${d.label || '(no name)'}"`).join(', '));
+      if (!dev) throw new Error('the chosen board audio input is gone (choose it again under "from board", or the WebUSB stream)');
+      A.stream = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: { exact: dev.deviceId }, channelCount: 2,
+        echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+      src = A.ctx.createMediaStreamSource(A.stream);
+      $('anote').textContent = `From "${dev.label}"` + ($('aout').value ? '' : ' to the system default output') + '. Muted while transmitting.';
+    }
+    A.gain = A.ctx.createGain(); A.an = A.ctx.createAnalyser(); A.an.fftSize = 1024;
+    src.connect(A.gain); A.gain.connect(A.an); A.gain.connect(A.ctx.destination);
+    applyAudio();
+    await applySink();
+    if (A.ctx.state === 'suspended') await A.ctx.resume();
+    $('listen').textContent = 'Stop'; $('listen').classList.remove('primary'); $('listen').classList.add('active');
+    store.set('listening', true);
+    const buf = new Float32Array(A.an.fftSize);
+    const meter = () => {
+      if (!A.an) return;
+      A.an.getFloatTimeDomainData(buf);
+      let s2 = 0; for (const x of buf) s2 += x * x;
+      const dbfs = 10 * Math.log10(s2 / buf.length + 1e-12);
+      $('alevel').style.width = Math.max(0, Math.min(100, (dbfs + 60) / 60 * 100)) + '%';
+      A.raf = requestAnimationFrame(meter);
+    };
+    meter();
+    if (S.status && S.status.mode === 0) log('audio: mode I/Q plays I on the left and Q on the right; choose USB or LSB to listen.');
+  } catch (e) { log('audio: ' + e.message); stopListen(); }
+}
+
+// ---------------------------------------------------------------- TX: microphone -> WebUSB stream (default) or "qrpico TX" USB audio output
+const TXA = { ctx: null, stream: null, comp: null, dry: null, gain: null, gate: null, toneGain: null, an: null,
+              raf: 0, levelDb: -120, ptt: false, pttSince: 0, ka: 0, tuning: false, out: false,
+              node: null, idx: 0, adj: 0, lvl: -1 };
+// Capture worklet: the processed microphone at the context rate -> 12 kS/s int16 chunks of 144
+// samples (12 ms), posted only while 'on' (PTT). Windowed-sinc decimation (64 taps at the input
+// rate, 64 phases, cut-off 5 kHz). The step is the nominal ratio x (1 + adj); adj comes from the
+// board's ring level in STATUS (txRate), so the app sends at the board crystal's 12 kS/s.
+const TX_WORKLET = `
+class QrpicoTx extends AudioWorkletProcessor {
+  constructor() {
+    super();
+    const T = 64, P = 64, fc = 5000 / sampleRate;
+    this.T = T; this.P = P; this.h = new Float32Array((P + 1) * T);
+    for (let ph = 0; ph <= P; ph++) {
+      let sum = 0;
+      for (let k = 0; k < T; k++) {
+        const d = T / 2 - 1 - k + ph / P, a = 2 * Math.PI * fc * d, u = d / (T / 2);
+        const v = (Math.abs(a) < 1e-9 ? 1 : Math.sin(a) / a) * (Math.abs(u) >= 1 ? 0 : 0.42 + 0.5 * Math.cos(Math.PI * u) + 0.08 * Math.cos(2 * Math.PI * u));
+        this.h[ph * T + k] = v; sum += v;
+      }
+      for (let k = 0; k < T; k++) this.h[ph * T + k] /= sum;
+    }
+    this.N = 8192; this.buf = new Float32Array(this.N); this.w = 0; this.r = T;
+    this.step0 = sampleRate / 12000; this.adj = 0; this.on = false;
+    this.out = new Int16Array(144); this.n = 0;
+    this.port.onmessage = e => {
+      if ('adj' in e.data) this.adj = e.data.adj;
+      if ('on' in e.data && e.data.on !== this.on) { this.on = e.data.on; this.n = 0; }
+    };
+  }
+  process(inputs) {
+    const x = inputs[0] && inputs[0][0], T = this.T, P = this.P, h = this.h, N = this.N, b = this.buf;
+    const len = x ? x.length : 128;
+    for (let j = 0; j < len; j++) b[this.w++ % N] = x ? x[j] : 0;
+    const step = this.step0 * (1 + this.adj);
+    while (this.r + T / 2 < this.w) {
+      const i = Math.floor(this.r), f = (this.r - i) * P, ph = Math.floor(f), t = f - ph, h0 = ph * T, h1 = h0 + T;
+      let y = 0;
+      for (let k = 0, n = i - T / 2 + 1; k < T; k++, n++) y += b[n % N] * (h[h0 + k] + t * (h[h1 + k] - h[h0 + k]));
+      this.r += step;
+      if (!this.on) continue;
+      this.out[this.n++] = Math.max(-32767, Math.min(32767, Math.round(y * 32767)));
+      if (this.n === this.out.length) { this.port.postMessage(this.out.slice()); this.n = 0; }
+    }
+    if (this.w > 1e9) { const sh = Math.floor((this.r - T) / N) * N; this.r -= sh; this.w -= sh; }
+    return true;
+  }
+}
+registerProcessor('qrpico-tx', QrpicoTx);
+`;
+// one 12 ms chunk from the worklet -> AUDIO_TX frame (u32 running index, u16 n, u16 0, int16[n])
+function txAudioChunk(s) {
+  if (!link || !TXA.ptt) return;
+  const pl = new Uint8Array(8 + 2 * s.length), v = new DataView(pl.buffer);
+  v.setUint32(0, TXA.idx >>> 0, true); v.setUint16(4, s.length, true);
+  for (let i = 0; i < s.length; i++) v.setInt16(8 + 2 * i, s[i], true);
+  TXA.idx += s.length;
+  link.send(T_AUDIO_TX, pl).catch(() => {});
+}
+// rate matching from the board's app TX ring level (STATUS, 5 per second): P control around the
+// board's priming level (720 samples = 60 ms), at most +-0.2 %; adj is kept between PTTs
+function txRate() {
+  const st = S.status;
+  if (!TXA.node || !st || st.appLevel === undefined) return;
+  if (st.txState === 2 && st.txApp) {
+    TXA.lvl = TXA.lvl < 0 ? st.appLevel : TXA.lvl + 0.2 * (st.appLevel - TXA.lvl);
+    TXA.adj = Math.max(-0.002, Math.min(0.002, 0.02 * (TXA.lvl - 720) / 720));
+    TXA.node.port.postMessage({ adj: TXA.adj });
+  } else TXA.lvl = -1;
+  $('txnote').textContent = `TX audio over WebUSB (12 kS/s) while PTT is on: board ring ${(st.appLevel / 12).toFixed(0)} ms, ` +
+    `rate ${TXA.adj >= 0 ? '+' : ''}${(TXA.adj * 1e6).toFixed(0)} ppm, underruns ${st.appUnder}, overruns ${st.appOver}.`;
+}
+async function fillMics() { await fillAudioSelects(); }
+function micOff() {
+  setPtt(false);
+  cancelAnimationFrame(TXA.raf);
+  if (TXA.stream) TXA.stream.getTracks().forEach(t => t.stop());
+  if (TXA.node) { TXA.node.port.onmessage = null; cmd('stream txaudio off', true); }
+  if (TXA.ctx) TXA.ctx.close();
+  Object.assign(TXA, { ctx: null, stream: null, comp: null, dry: null, gain: null, gate: null, toneGain: null, an: null, levelDb: -120, out: false, node: null });
+  $('micon').textContent = 'Mic on'; $('micon').classList.remove('active'); $('mlevel').style.width = '0';
+}
+async function micOn() {
+  if (TXA.ctx) { micOff(); return; }
+  try {
+    const ds = await fillAudioSelects(await audioDevices());
+    const ctx = TXA.ctx = new AudioContext({ latencyHint: 'interactive' });
+    // never the board's own RX audio as the microphone: if the system default input is the board, take the first other input
+    let micId = $('mic').value;
+    if (!micId && defaultIsBoard(ds)) {
+      const other = ds.find(d => d.kind === 'audioinput' && d.deviceId !== 'default' && d.deviceId !== 'communications' && !isBoard(d, ds));
+      if (!other) throw new Error('the only audio input is the board itself: connect a microphone');
+      micId = other.deviceId;
+      log(`microphone: the system default input is the board, using "${other.label}" instead`);
+    }
+    TXA.stream = await navigator.mediaDevices.getUserMedia({ audio: { ...(micId ? { deviceId: { exact: micId } } : {}),
+      channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+    const src = ctx.createMediaStreamSource(TXA.stream);
+    // speech band 250-2800 Hz, optional compressor, gain, meter, PTT gate
+    const hp = new BiquadFilterNode(ctx, { type: 'highpass', frequency: 250, Q: 0.7 });
+    const lp = new BiquadFilterNode(ctx, { type: 'lowpass', frequency: 2800, Q: 0.7 });
+    TXA.comp = new DynamicsCompressorNode(ctx, { threshold: -30, knee: 6, ratio: 4, attack: 0.005, release: 0.15 });
+    TXA.dry = ctx.createGain();
+    TXA.gain = ctx.createGain(); TXA.an = ctx.createAnalyser(); TXA.an.fftSize = 1024;
+    TXA.gate = ctx.createGain(); TXA.gate.gain.value = 0;
+    const tone = new OscillatorNode(ctx, { frequency: 1000 });
+    TXA.toneGain = ctx.createGain(); TXA.toneGain.gain.value = 0; tone.connect(TXA.toneGain); tone.start();
+    src.connect(hp); hp.connect(lp); lp.connect(TXA.comp); lp.connect(TXA.dry);
+    TXA.comp.connect(TXA.gain); TXA.dry.connect(TXA.gain);
+    TXA.toneGain.connect(TXA.gain);
+    TXA.gain.connect(TXA.an); TXA.gain.connect(TXA.gate);
+    applyMic();
+    // output: the WebUSB stream, or only the board's TX audio device; never the PC speakers (feedback, and it would not transmit)
+    const outs = ds.filter(d => d.kind === 'audiooutput' && d.deviceId !== 'default' && isBoard(d, ds));
+    const out = outs.find(d => d.deviceId === $('txout').value);
+    if (!$('txout').value) {
+      // nothing audible: the context renders into no device where the browser allows it, else into a muted gain
+      if (typeof ctx.setSinkId === 'function') { try { await ctx.setSinkId({ type: 'none' }); } catch (e) {} }
+      const url = URL.createObjectURL(new Blob([TX_WORKLET], { type: 'application/javascript' }));
+      await ctx.audioWorklet.addModule(url); URL.revokeObjectURL(url);
+      TXA.node = new AudioWorkletNode(ctx, 'qrpico-tx', { numberOfInputs: 1, numberOfOutputs: 1, channelCount: 1, channelCountMode: 'explicit' });
+      TXA.node.port.onmessage = e => txAudioChunk(e.data);
+      TXA.node.port.postMessage({ adj: TXA.adj, on: TXA.ptt });
+      const sink = ctx.createGain(); sink.gain.value = 0;
+      TXA.gate.connect(TXA.node); TXA.node.connect(sink); sink.connect(ctx.destination);
+      TXA.out = true;
+      await cmd('stream txaudio on', true);
+      $('txnote').textContent = 'TX audio goes over WebUSB (12 kS/s) while PTT is on.';
+    } else if (out && typeof ctx.setSinkId === 'function') {
+      await ctx.setSinkId(out.deviceId);
+      TXA.gate.connect(ctx.destination); TXA.out = true;
+      $('txnote').textContent = `TX audio goes to "${out.label}" while PTT is on.`;
+    } else {
+      if (typeof ctx.setSinkId === 'function') { try { await ctx.setSinkId({ type: 'none' }); } catch (e) {} }
+      $('txnote').textContent = out ? 'This browser cannot select the board output (AudioContext.setSinkId): TX audio is not sent.'
+        : 'The chosen board audio output is gone (choose it again under "to board", or the WebUSB stream): the microphone is only metered, nothing is sent.';
+      $('txnote').classList.add('warnnote');
+    }
+    if (TXA.out) $('txnote').classList.remove('warnnote');
+    $('micon').textContent = 'Mic off'; $('micon').classList.add('active');
+    const buf = new Float32Array(TXA.an.fftSize);
+    const meter = () => {
+      if (!TXA.an) return;
+      TXA.an.getFloatTimeDomainData(buf);
+      let s2 = 0; for (const x of buf) s2 += x * x;
+      TXA.levelDb = 10 * Math.log10(s2 / buf.length + 1e-12);
+      $('mlevel').style.width = Math.max(0, Math.min(100, (TXA.levelDb + 60) / 60 * 100)) + '%';
+      TXA.raf = requestAnimationFrame(meter);
+    };
+    meter();
+  } catch (e) { log('microphone: ' + e.message); micOff(); }
+}
+function applyMic() {
+  if (!TXA.ctx) return;
+  const t = TXA.ctx.currentTime, comp = $('mcomp').checked;
+  TXA.gain.gain.setTargetAtTime(Number($('mgain').value), t, 0.01);
+  TXA.comp.ratio.value = comp ? 4 : 1;
+  TXA.dry.gain.setTargetAtTime(comp ? 0 : 1, t, 0.01);
+  TXA.gate.gain.setTargetAtTime(TXA.ptt ? 1 : 0, t, 0.005);
+  TXA.toneGain.gain.setTargetAtTime(TXA.tuning ? 0.316 : 0, t, 0.005);   // -10 dB
+}
+async function setPtt(on, fromBoard = false) {
+  if (on === TXA.ptt) return;
+  TXA.ptt = on;
+  const b = $('ptt'); b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on));
+  b.textContent = on ? 'TX – release to receive' : 'PTT (hold, or Space)';
+  applyMic();
+  if (TXA.node) TXA.node.port.postMessage({ on });
+  clearInterval(TXA.ka);
+  if (on) {
+    TXA.pttSince = Date.now(); TXA.sawActive = false;
+    if (!TXA.out) log('PTT: no TX audio output (Mic on with the board connected), the board transmits silence.');
+    await cmd('ptt on');
+    TXA.ka = setInterval(() => cmd('ptt ka', true), 250);       // the board drops TX after 1 s without it
+  } else {
+    TXA.tuning = false; applyMic();
+    if (!fromBoard) await cmd('ptt off');
+  }
+}
+(() => {
+  const b = $('ptt');
+  b.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    if ($('latch').checked) {
+      if (!TXA.ptt && !confirm('Latching PTT: transmit until you press again (the board still stops at its time-out). Continue?')) return;
+      setPtt(!TXA.ptt);
+    } else { b.setPointerCapture(e.pointerId); setPtt(true); }
+  });
+  const up = () => { if (!$('latch').checked) setPtt(false); };
+  b.addEventListener('pointerup', up); b.addEventListener('pointercancel', up);
+  const t = $('tunebtn');
+  t.addEventListener('pointerdown', e => { e.preventDefault(); t.setPointerCapture(e.pointerId); TXA.tuning = true; setPtt(true); applyMic(); });
+  const tup = () => { if (TXA.tuning) setPtt(false); };
+  t.addEventListener('pointerup', tup); t.addEventListener('pointercancel', tup);
+  const typing = () => ['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement.tagName) && document.activeElement.type !== 'checkbox' && document.activeElement.type !== 'range';
+  window.addEventListener('keydown', e => { if (e.code === 'Space' && !e.repeat && !typing()) { e.preventDefault(); if ($('latch').checked) setPtt(!TXA.ptt); else setPtt(true); } });
+  window.addEventListener('keyup', e => { if (e.code === 'Space' && !typing()) { e.preventDefault(); if (!$('latch').checked) setPtt(false); } });
+  // leaving the page or hiding it always releases PTT (the board also drops TX after 1 s without keepalive)
+  const release = () => { if (TXA.ptt) setPtt(false); };
+  window.addEventListener('pagehide', release);
+  window.addEventListener('blur', () => { if (!$('latch').checked) release(); });
+  document.addEventListener('visibilitychange', () => { if (document.hidden) release(); });
+  $('micon').addEventListener('click', micOn);
+  $('mic').addEventListener('change', () => { if (TXA.ctx) { micOff(); micOn(); } });
+  ['mgain', 'mcomp'].forEach(id => $(id).addEventListener('input', applyMic));
+  $('txloop').addEventListener('change', () => cmd(`txmon ${$('txloop').checked ? 'loop' : 'off'}`));
+})();
+
+// ---------------------------------------------------------------- interaction
+// frequency text: "14.074" (MHz), "14074" or "14074k" (kHz), "14074000" (Hz), "7.0745M"
+function parseFreq(t) {
+  const m = String(t).trim().replace(',', '.').match(/^([0-9.]+)\s*([kKmM]?)(?:hz|Hz)?$/);
+  if (!m) return NaN;
+  const v = parseFloat(m[1]), u = m[2].toLowerCase();
+  if (u === 'k') return v * 1e3;
+  if (u === 'm') return v * 1e6;
+  return v < 100 ? v * 1e6 : v < 1e5 ? v * 1e3 : v;
+}
+function tune(f) {
+  f = Math.round(f / 10) * 10; S.wanted = f; $('freq').value = fmtHz(f); cmd(`tune ${f}`); drawSpectrum(); drawWfOverlay();
+  store.set('freq', f);
+}
+const step = () => Number($('step').value);
+function setMode(m) { S.mode = m; cmd(`mode ${m}`); drawSpectrum(); drawWfOverlay(); store.set('mode', m);
+  document.querySelectorAll('[data-mode]').forEach(b => b.classList.toggle('active', b.dataset.mode === m)); }
+for (const id of ['spec', 'wf']) {
+  const c = $(id);
+  c.addEventListener('click', e => { if (!S.spec) return; const r = c.getBoundingClientRect(); tune(fOf(e.clientX - r.left, S.spec, r.width)); });
+  c.addEventListener('wheel', e => { e.preventDefault(); const st = step() * (e.shiftKey ? 10 : 1); tune(Math.round(S.wanted / st) * st + (e.deltaY < 0 ? st : -st)); }, { passive: false });
+  c.addEventListener('mousemove', e => {
+    if (!S.spec) return; const r = c.getBoundingClientRect(), f = fOf(e.clientX - r.left, S.spec, r.width);
+    const k = Math.floor((e.clientX - r.left) / r.width * S.spec.db.length);
+    $('readout').textContent = `${fmtHz(f)} MHz  ${S.spec.db[k] !== undefined ? S.spec.db[k].toFixed(1) : ''} dBFS  (${((f - S.wanted) / 1000).toFixed(2)} kHz from tuned)`;
+  });
+  c.addEventListener('mouseleave', () => { $('readout').textContent = ''; });
+}
+$('freq').addEventListener('keydown', e => {
+  if (e.key === 'Enter') { const f = parseFreq($('freq').value); if (isFinite(f) && f > 0) tune(f); else log('frequency: use e.g. 14.074, 14074 or 14074000'); $('freq').blur(); }
+  if (e.key === 'Escape') { $('freq').value = fmtHz(S.wanted); $('freq').blur(); }
+});
+$('freq').addEventListener('focus', () => $('freq').select());
+// band of a frequency like radio_band_for() in src/control/radio.c (band numbers 1 = 10 m .. 3 = 40 m, 0 = none)
+const bandFor = f => 1 + [[28e6, 29.7e6], [14e6, 14.35e6], [7e6, 7.2e6]].findIndex(([a, b]) => f >= a - 2e5 && f <= b + 2e5);
+document.querySelectorAll('[data-f]').forEach(b => b.addEventListener('click', () => {
+  const n = Number(b.dataset.band), f = store.get('band-' + n, Number(b.dataset.f));
+  tune(bandFor(f) === n ? f : Number(b.dataset.f));   // ignore a stored value from another band
+}));
+document.querySelectorAll('[data-mode]').forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
+// remember the last frequency per band, so that a band button returns there
+// (by the frequency itself: STATUS still reports the old band right after a band change)
+setInterval(() => { const n = bandFor(S.wanted); if (n) store.set('band-' + n, S.wanted); }, 2000);
+$('rxbtn').addEventListener('click', () => cmd(S.status && S.status.running ? 'rx stop' : `rx start ${$('source').value}`));
+$('source').addEventListener('change', () => { if (S.status && S.status.running) cmd(`rx start ${$('source').value}`); });
+$('step').addEventListener('change', () => store.set('step', $('step').value));
+$('tset').addEventListener('click', () => {
+  const [o1, l1] = $('t1').value.trim().split(/\s+/).map(Number), [o2, l2] = $('t2').value.trim().split(/\s+/).map(Number);
+  cmd(`rx test ${Math.round(S.wanted + o1)} ${l1} ${Math.round(S.wanted + o2)} ${l2}`);
+});
+// console with history (↑ / ↓)
+const hist = store.get('history', []); let hpos = hist.length;
+const sendCmd = () => { const v = $('cmd').value.trim(); if (!v) return; cmd(v); $('cmd').value = '';
+  if (hist[hist.length - 1] !== v) { hist.push(v); if (hist.length > 50) hist.shift(); store.set('history', hist); } hpos = hist.length; };
+$('send').addEventListener('click', sendCmd);
+$('cmd').addEventListener('keydown', e => {
+  if (e.key === 'Enter') sendCmd();
+  else if (e.key === 'ArrowUp' && hpos > 0) { $('cmd').value = hist[--hpos]; e.preventDefault(); }
+  else if (e.key === 'ArrowDown') { hpos = Math.min(hist.length, hpos + 1); $('cmd').value = hist[hpos] || ''; e.preventDefault(); }
+});
+// TX power: the PEP envelope command of PTT (firmware `txb limit`, 0.05 after every board reset)
+function pwrText(l) { return `${l.toFixed(2)} ≈ ${(5.4 * l * l).toFixed(l < 0.3 ? 2 : 1)} W`; }   // board 1: 4.8 W at 0.94
+let pwrTimer = 0;
+function sendPower() { cmd(`txb limit ${Number($('txpwr').value).toFixed(2)}`, true); }
+$('txpwr').addEventListener('input', () => {
+  $('txpwrv').textContent = pwrText(Number($('txpwr').value)); store.set('txpwr', $('txpwr').value);
+  clearTimeout(pwrTimer); pwrTimer = setTimeout(sendPower, 250);
+});
+function afterConnect() {
+  if (link) {
+    sendPower();
+    if (A.node) cmd('stream audio on', true); else if (store.get('listening', false) && !A.ctx) listen();
+    if (TXA.node) cmd('stream txaudio on', true);
+  }
+}
+$('connect').addEventListener('click', async () => { await connectUsb(); afterConnect(); });
+$('demo').addEventListener('click', startDemo);
+$('help').addEventListener('click', () => { $('helptext').hidden = !$('helptext').hidden; });
+$('theme').addEventListener('click', () => {
+  const r = document.documentElement, dark = matchMedia('(prefers-color-scheme: dark)').matches;
+  const cur = r.dataset.theme || (dark ? 'dark' : 'light');
+  r.dataset.theme = cur === 'dark' ? 'light' : 'dark';
+  store.set('theme', r.dataset.theme);
+});
+// keyboard (not while typing in a field): tuning, mode, band, mute; Space is PTT (TX section)
+window.addEventListener('keydown', e => {
+  const a = document.activeElement;
+  if (['INPUT', 'SELECT', 'TEXTAREA'].includes(a.tagName) && a.type !== 'checkbox' && a.type !== 'range') return;
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  const st = step() * (e.shiftKey ? 10 : 1);
+  if (e.key === 'ArrowRight') tune(Math.round(S.wanted / st) * st + st);
+  else if (e.key === 'ArrowLeft') tune(Math.round(S.wanted / st) * st - st);
+  else if (e.key === 'ArrowUp') tune(S.wanted + 1000);
+  else if (e.key === 'ArrowDown') tune(S.wanted - 1000);
+  else if (e.key === 'u' || e.key === 'U') setMode('usb');
+  else if (e.key === 'l' || e.key === 'L') setMode('lsb');
+  else if (e.key === 'm' || e.key === 'M') { $('amute').checked = !$('amute').checked; applyAudio(); }
+  else if (['1', '2', '3'].includes(e.key)) document.querySelector(`[data-band="${4 - Number(e.key)}"]`).click();
+  else return;
+  e.preventDefault();
+});
+// remembered settings
+const persist = (id, prop = 'value') => {
+  const el = $(id), v = store.get('ui-' + id, null);
+  if (v !== null) el[prop] = v;
+  el.addEventListener(el.type === 'checkbox' || el.tagName === 'SELECT' ? 'change' : 'input', () => store.set('ui-' + id, el[prop]));
+};
+['dbmin', 'dbmax', 'wfmin', 'wfmax', 'wfspeed', 'wftick', 'avol', 'mgain'].forEach(id => persist(id));
+['wfauto', 'hidelo', 'mcomp', 'latch'].forEach(id => persist(id, 'checked'));
+['p-status', 'p-test', 'p-console'].forEach(id => persist(id, 'open'));
+$('step').value = store.get('step', '100');
+$('txpwr').value = store.get('txpwr', '0.30'); $('txpwrv').textContent = pwrText(Number($('txpwr').value));
+S.mode = store.get('mode', 'usb');
+document.querySelectorAll('[data-mode]').forEach(b => b.classList.toggle('active', b.dataset.mode === S.mode));
+{ const t = store.get('theme', null); if (t) document.documentElement.dataset.theme = t; }
+['dbmin', 'dbmax', 'hidelo'].forEach(id => $(id).addEventListener('input', drawSpectrum));
+['wfmin', 'wfmax'].forEach(id => $(id).addEventListener('input', () => { $('wfauto').checked = false; }));
+$('listen').addEventListener('click', listen);
+$('aout').addEventListener('change', () => { remember($('aout'), 'aout'); applySink(); });
+$('ain').addEventListener('change', () => { remember($('ain'), 'ain'); if (A.ctx) { stopListen(); listen(); } });
+$('mic').addEventListener('change', () => remember($('mic'), 'mic'));
+$('txout').addEventListener('change', () => { remember($('txout'), 'txout'); if (TXA.ctx) { micOff(); micOn(); } });
+['avol', 'amute'].forEach(id => $(id).addEventListener('input', applyAudio));
+navigator.mediaDevices && navigator.mediaDevices.addEventListener('devicechange', () => fillAudioSelects().catch(() => {}));
+navigator.mediaDevices && fillAudioSelects().catch(() => {});
+window.addEventListener('resize', () => { S.fLoWf = null; drawSpectrum(); drawWfOverlay(); });
+if (new URLSearchParams(location.search).has('demo')) startDemo();
+log('qrpico: Connect (WebUSB, Chrome / Edge) or Demo. ? shows the keys.');
+</script>
+</body>
+</html>
