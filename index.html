@@ -200,7 +200,7 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
     </p>
     <div class="tabs seg" role="tablist" aria-label="View">
       <button role="tab" data-tab="spec" aria-selected="true">Spectrum</button>
-      <button role="tab" data-tab="ft8" aria-selected="false">FT8</button>
+      <button role="tab" data-tab="ft8" aria-selected="false">FT8 / FT4</button>
       <button role="tab" data-tab="wspr" aria-selected="false">WSPR</button>
     </div>
     <div id="v-spec" class="tabview">
@@ -247,8 +247,8 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
         <canvas id="ft8wfo"></canvas>
         <div id="ft8ro" class="readout"></div>
       </div>
-      <p class="note" style="margin:0">Audio 0 – 3.2 kHz of the USB passband. Tap / click to set the TX frequency (red: your 50 Hz). Calls of the last slot at their frequency.</p>
-      <div class="row"><button id="ft8on">Decode FT8</button><button id="ft8clear">Clear</button></div>
+      <p class="note" style="margin:0">Audio 0 – 3.2 kHz of the USB passband. Tap / click to set the TX frequency (red: your signal). Calls of the last slot at their frequency.</p>
+      <div class="row"><select id="ft8mode" aria-label="Mode"><option value="FT8">FT8</option><option value="FT4">FT4</option></select><button id="ft8on">Decode FT8</button><button id="ft8clear">Clear</button></div>
       <div class="freqwarn" id="ft8fw" role="status" hidden><span></span><button type="button">Tune</button></div>
       <p class="note" id="ft8st">Decodes every 15 s slot from the board's receive audio (USB, e.g. 14.074 MHz). Needs the PC / phone clock within about ±1 s (NTP).</p>
       <div class="field" style="margin-top:6px">
@@ -312,6 +312,7 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
   <button id="mptt" class="ptt" aria-pressed="false">PTT</button>
 </div>
 <script src="ft8.js"></script>
+<script src="ft4.js"></script>
 <script src="wspr.js"></script>
 <script>
 'use strict';
@@ -349,7 +350,7 @@ const WS = { on: false, worker: null, busy: false, lastPeriod: 0, en: false, txP
 const V = { tab: 'spec', buf: new Float32Array(4096), n: 0, lo: -100, hi: -60, lastSlot: 0 };
 // FT8 decoder state (section "FT8 decoding"); here because the waterfall overlay reads F.marks
 const F = { on: false, worker: null, ring: new Float32Array(12000 * 130),   // 130 s: also a WSPR period
-            next: -1, offs: null, offsAt: 0, lastSlot: 0,
+            next: -1, offs: null, offsAt: 0, lastSlot: 0, mode: 'FT8',
             busy: false, marks: [], rows: 0 };
 const T_CMD = 0x01, T_AUDIO_TX = 0x02, T_TEXT = 0x81, T_SPECTRUM = 0x82, T_STATUS = 0x83, T_AUDIO = 0x84;
 const VID = 0x1209, PID = 0x0001;
@@ -1117,6 +1118,15 @@ async function listen() {
   } catch (e) { log('audio: ' + e.message); stopListen(); }
 }
 
+// ---------------------------------------------------------------- FT8 / FT4 (ft8.js, ft4.js): one tab, the mode picks
+// slot length, decode time (after the signal's end at the latest DT), TX window and end, encoder, board command
+const DIGI = {
+  FT8: { slot: 15, decodeAt: 13.6, len: 180000, need: 120000, txWin: 2.0, txEnd: 14.2, lib: () => FT8, load: 'ft8 load', bw: 50, mid: 22,
+         dial: { '40m': 7074000, '20m': 14074000, '10m': 28074000 }, parity: [':00 / :30', ':15 / :45'] },
+  FT4: { slot: 7.5, decodeAt: 6.0, len: 90000, need: 66000, txWin: 1.0, txEnd: 6.6, lib: () => FT4, load: 'ft4 load', bw: 83, mid: 31,
+         dial: { '40m': 7047500, '20m': 14080000, '10m': 28180000 }, parity: ['even slots', 'odd slots'] },
+};
+const DM = () => DIGI[F.mode];
 // ---------------------------------------------------------------- FT8 decoding (ft8.js in a worker)
 // Every sample of the 12 kS/s stream gets a wall-clock time: index / 12000 + offs, with offs the
 // smallest (arrival time - index / 12000) seen in the last 30 s (the least delayed frame). 13.6 s after
@@ -1133,19 +1143,19 @@ function ft8Collect(first, s) {
 }
 function ft8Tick() {
   if (!F.on || F.offs === null || F.busy) return;
-  const now = Date.now() / 1000, slot = Math.floor(now / 15) * 15;
-  if (now - slot < 13.6 || slot === F.lastSlot) return;
+  const m = DM(), now = Date.now() / 1000, slot = Math.floor(now / m.slot) * m.slot;
+  if (now - slot < m.decodeAt || slot === F.lastSlot) return;
   F.lastSlot = slot;
   // our own TX slot: no receive audio in it (and the mapping across the pause is not exact)
   if (Q.txSlot === slot) { $('ft8st').textContent = `slot ${hms(slot)}: own transmission`; return; }
-  const i0 = Math.round((slot - F.offs) * 12000), N = F.ring.length, audio = new Float32Array(180000);
+  const i0 = Math.round((slot - F.offs) * 12000), N = F.ring.length, audio = new Float32Array(m.len);
   let have = 0;
-  for (let i = 0; i < 180000; i++) {
+  for (let i = 0; i < m.len; i++) {
     const k = i0 + i;
     if (k < F.next - N + 1 || k >= F.next || k < 0) continue;      // not received (yet) or overwritten
     audio[i] = F.ring[k % N]; have++;
   }
-  if (have < 120000) { $('ft8st').textContent = `slot ${hms(slot)}: only ${(have / 12000).toFixed(1)} s of audio, not decoded`; return; }
+  if (have < m.need) { $('ft8st').textContent = `slot ${hms(slot)}: only ${(have / 12000).toFixed(1)} s of audio, not decoded`; return; }
   if (!F.worker) {
     F.worker = new Worker('ft8worker.js');
     F.worker.onmessage = e => ft8Result(e.data);
@@ -1154,11 +1164,12 @@ function ft8Tick() {
   F.busy = true;
   // phones (touch screen): the faster setting, about half the CPU for ~3 % fewer decodes (ft8.js)
   const fast = matchMedia('(pointer: coarse)').matches ? { stall: 6, maxCand2: 120 } : {};
-  F.worker.postMessage({ slot, audio, opt: Object.assign({ fmin: 150, fmax: 3100 }, fast) }, [audio.buffer]);
+  F.worker.postMessage({ slot, mode: F.mode, audio, opt: Object.assign({ fmin: 150, fmax: 3100 }, fast) }, [audio.buffer]);
 }
 const hms = t => new Date(t * 1000).toISOString().slice(11, 19).replace(/:/g, '');
 function ft8Result(r) {
   F.busy = false;
+  if (r.mode !== F.mode) return;                          // switched while decoding
   const list = $('ft8list'), dial = S.wanted, usb = (S.status ? S.status.mode : modeNames.indexOf(S.mode)) !== 2;
   const dts = r.decodes.map(d => d.dt).sort((a, b) => a - b), med = dts.length ? dts[dts.length >> 1] : null;
   $('ft8st').textContent = `slot ${hms(r.slot)}: ${r.decodes.length} decode${r.decodes.length === 1 ? '' : 's'}, ${r.ms} ms` +
@@ -1185,20 +1196,29 @@ function ft8Result(r) {
   ft8WfOverlay();
   F.marks = r.decodes.map(d => {
     const w = d.text.split(' '), who = w[0] === 'CQ' ? w[w.length - (/^[A-R]{2}[0-9]{2}$/.test(w[w.length - 1]) ? 2 : 1)] : (w[1] || w[0]);
-    return { rf: dial + (usb ? 1 : -1) * (d.freq + 22), label: who, cq: w[0] === 'CQ' };
+    return { rf: dial + (usb ? 1 : -1) * (d.freq + DM().mid), label: who, cq: w[0] === 'CQ' };
   });
   drawWfOverlay();
   ft8Sequence(r);
 }
 function ft8Set(on) {
   F.on = on; store.set('ft8', on);
-  $('ft8on').textContent = on ? 'Stop FT8' : 'Decode FT8'; $('ft8on').classList.toggle('active', on);
+  $('ft8on').textContent = on ? `Stop ${F.mode}` : `Decode ${F.mode}`; $('ft8on').classList.toggle('active', on);
   if (!on) { F.marks = []; drawWfOverlay(); }
   F.offs = null; F.next = -1;
   audioStream();
 }
 $('ft8on').addEventListener('click', () => ft8Set(!F.on));
 $('ft8adif').addEventListener('click', ft8Adif);
+function ft8SetMode(mode) {
+  if (Q.txing || Q.en) ft8Halt();                         // a running QSO stays in the mode it began in
+  F.mode = mode; store.set('ft8mode', mode); $('ft8mode').value = mode;
+  F.lastSlot = 0; F.audioMarks = []; F.marks = [];
+  $('ft8on').textContent = F.on ? `Stop ${mode}` : `Decode ${mode}`;
+  $('ft8st').textContent = `Decodes every ${DM().slot} s slot from the board's receive audio (USB, e.g. ${fmtHz(DM().dial['20m']).slice(0, 6)} MHz). Needs the PC / phone clock within about ±1 s (NTP).`;
+  ft8WfOverlay(); drawWfOverlay(); digiWarn(); ft8Show();
+}
+$('ft8mode').addEventListener('change', () => ft8SetMode($('ft8mode').value));
 ft8LogCount();
 ['ft8fw', 'wsprfw'].forEach(id => $(id).querySelector('button').addEventListener('click', () => { tune(Number($(id).dataset.f)); setMode('usb'); }));
 $('ft8clear').addEventListener('click', () => { $('ft8list').textContent = ''; F.marks = []; drawWfOverlay(); });
@@ -1207,7 +1227,7 @@ setInterval(ft8Tick, 250);
 // ---- FT8 TX: one QSO at a time, WSJT-X style sequence; the board makes the waveform (ft8 load + PTT)
 const Q = { my: '', grid: '', en: false, his: null, hisGrid: '', step: '', msg: '', parity: 0, tries: 0,
             sentRpt: '', rcvdRpt: '', logged: false, txSlot: 0, txing: false, ka: 0, end: 0 };
-const slotParity = t => Math.floor(t / 15) % 2;           // 0: :00 / :30, 1: :15 / :45
+const slotParity = t => Math.floor(t / DM().slot) % 2;   // FT8 0: :00 / :30, 1: :15 / :45; FT4: even / odd 7.5 s slots
 const rptText = snr => { const v = Math.max(-30, Math.min(49, Math.round(snr))); return (v < 0 ? '-' : '+') + String(Math.abs(v)).padStart(2, '0'); };
 const isGrid = w => /^[A-R]{2}[0-9]{2}$/.test(w) && w !== 'RR73';
 function ft8Settings() {
@@ -1233,7 +1253,7 @@ function ft8Show() {
   $('ft8en').classList.toggle('active', Q.en); $('ft8en').textContent = Q.en ? 'TX enabled' : 'Enable TX';
   wakeUpdate(); digiWarn();
   if (Q.txing) el.textContent = `TX now: ${Q.msg}`;
-  else if (Q.en && Q.msg) el.textContent = `next TX (${Q.parity ? ':15 / :45' : ':00 / :30'}): ${Q.msg}` + (Q.tries ? ` - try ${Q.tries + 1}` : '');
+  else if (Q.en && Q.msg) el.textContent = `next ${F.mode} TX (${DM().parity[Q.parity]}): ${Q.msg}` + (Q.tries ? ` - try ${Q.tries + 1}` : '');
   else if (Q.msg) el.textContent = `ready: ${Q.msg} (Enable TX to send)`;
 }
 function ft8Check() {
@@ -1250,7 +1270,7 @@ function ft8SetMsg(msg, step) {
 // CQ in the coming slot
 function ft8Cq() {
   if (!ft8Check()) return;
-  Object.assign(Q, { his: null, hisGrid: '', sentRpt: '', rcvdRpt: '', logged: false, tries: 0, parity: slotParity(Date.now() / 1000 + 15) });
+  Object.assign(Q, { his: null, hisGrid: '', sentRpt: '', rcvdRpt: '', logged: false, tries: 0, parity: slotParity(Date.now() / 1000 + DM().slot) });
   ft8SetMsg(`CQ ${Q.my} ${Q.grid}`, 'cq');
 }
 // answer the station of a decode (row tap), in the other slot parity
@@ -1286,11 +1306,11 @@ function ft8Log() {
   if (Q.logged || !Q.his) return;
   Q.logged = true;
   const qsos = store.get('ft8log', []);
-  qsos.push({ t: new Date().toISOString(), call: Q.his, grid: Q.hisGrid, sent: Q.sentRpt, rcvd: Q.rcvdRpt, f: S.wanted, mode: 'FT8',
+  qsos.push({ t: new Date().toISOString(), call: Q.his, grid: Q.hisGrid, sent: Q.sentRpt, rcvd: Q.rcvdRpt, f: S.wanted, mode: F.mode,
     txhz: Number($('ft8txf').value) || 0, my: Q.my, mygrid: $('ft8grid').value.trim().toUpperCase(), dbm: wsprDbm() });
   store.set('ft8log', qsos);
   ft8LogCount();
-  log(`FT8: logged ${Q.his} ${Q.hisGrid} sent ${Q.sentRpt} rcvd ${Q.rcvdRpt} (${qsos.length} QSOs in the log)`);
+  log(`${F.mode}: logged ${Q.his} ${Q.hisGrid} sent ${Q.sentRpt} rcvd ${Q.rcvdRpt} (${qsos.length} QSOs in the log)`);
 }
 function ft8LogCount() { const n = store.get('ft8log', []).length; $('ft8logn').textContent = `${n} QSO${n === 1 ? '' : 's'} in the log of this browser`; }
 // ADIF 3.1 (adif.org): <FIELD:length>value per QSO, <EOR> after each; FREQ = dial + TX audio (the RF of the QSO)
@@ -1318,11 +1338,10 @@ function ft8Adif() {
   log(`ADIF: ${qsos.length} QSOs exported`);
 }
 // warning in the FT8 / WSPR tab when the dial is not the usual frequency of the band, or the mode is not USB
-const FT8_DIAL = { '40m': 7074000, '20m': 14074000, '10m': 28074000 };
 const WSPR_DIALS = { get '40m'() { return WSPR_DIAL[3]; }, get '20m'() { return WSPR_DIAL[2]; }, get '10m'() { return WSPR_DIAL[1]; } };
 function digiWarn() {
   const usb = (S.status ? S.status.mode : modeNames.indexOf(S.mode)) === 1, b = BANDS.find(r => S.wanted >= r[0] && S.wanted <= r[1]);
-  [['ft8fw', FT8_DIAL, 'FT8', Q.en], ['wsprfw', WSPR_DIALS, 'WSPR', WS.en]].forEach(([id, tab, name, tx]) => {
+  [['ft8fw', DM().dial, F.mode, Q.en], ['wsprfw', WSPR_DIALS, 'WSPR', WS.en]].forEach(([id, tab, name, tx]) => {
     const el = $(id), want = b && tab[b[2]];
     let t = '';
     if (!want) t = `Not in a band with a ${name} frequency (${Object.keys(tab).join(', ')}).`;
@@ -1337,18 +1356,18 @@ function digiWarn() {
 // transmit in our slot: load the symbols and key the board 0.3 s after the slot start (the TX sequence
 // takes ~0.2 s, so the waveform starts near +0.5 s: jt9 measured DT +0.1 s with 0.4 s); waits for the previous slot's decode up to +2 s (slow phones), then skips the slot
 function ft8TxTick() {
-  const now = Date.now() / 1000, slot = Math.floor(now / 15) * 15, into = now - slot;
+  const m = DM(), now = Date.now() / 1000, slot = Math.floor(now / m.slot) * m.slot, into = now - slot;
   if (Q.txing) {
     if (!S.status || now > Q.end || (S.status.txState === 0 && now - Q.txSlot > 2)) ft8TxEnd();
     return;
   }
-  if (!Q.en || !Q.msg || !link || slotParity(slot) !== Q.parity || Q.txSlot === slot || into < 0.3 || into > 2.0) return;
+  if (!Q.en || !Q.msg || !link || slotParity(slot) !== Q.parity || Q.txSlot === slot || into < 0.3 || into > m.txWin) return;
   if (F.busy) return;                                     // the previous slot may still change the message
   if (TXA.ptt) return;                                     // voice PTT in use
   if (Q.tries >= (Q.step === 'cq' ? 10 : Q.step === '73' ? 1 : 6)) { Q.en = false; log('FT8: no answer, TX stopped'); ft8Show(); return; }
-  const e = FT8.encode(Q.msg), f = Math.max(200, Math.min(2900, Number($('ft8txf').value) || 1500));
-  Q.txSlot = slot; Q.tries++; Q.txing = true; Q.end = slot + 14.2;
-  cmd(`ft8 load ${f} ${Array.from(e.tones).join('')}`, true);
+  const e = m.lib().encode(Q.msg), f = Math.max(200, Math.min(2900, Number($('ft8txf').value) || 1500));
+  Q.txSlot = slot; Q.tries++; Q.txing = true; Q.end = slot + m.txEnd;
+  cmd(`${m.load} ${f} ${Array.from(e.tones).join('')}`, true);
   cmd('ptt on');
   Q.ka = every250(() => cmd('ptt ka', true));
   ft8Show();
@@ -1427,7 +1446,7 @@ function ft8WfOverlay() {
   for (let f = 500; f < FT8WF_FMAX; f += 500) {
     const x = ft8X(f, W); g.fillRect(x, H - 6 * dpr, dpr, 6 * dpr); g.fillText(String(f), x + 2 * dpr, H - dpr);
   }
-  const tx = Number($('ft8txf').value) || 1500, x0 = ft8X(tx, W), x1 = ft8X(tx + 50, W);
+  const tx = Number($('ft8txf').value) || 1500, x0 = ft8X(tx, W), x1 = ft8X(tx + DM().bw, W);
   g.fillStyle = 'rgba(255,80,80,0.22)'; g.fillRect(x0, 0, Math.max(2, x1 - x0), H);
   g.fillStyle = 'rgba(255,80,80,0.9)'; g.fillRect(x0, 0, Math.max(1, dpr), H);
   const marks = (F.audioMarks || []).slice().sort((a, b) => a.f - b.f), free = [0, 0, 0];
@@ -2030,6 +2049,7 @@ function afterConnect() {
   }
 }
 $('connect').addEventListener('click', async () => { await connectUsb(); afterConnect(); });
+ft8SetMode(store.get('ft8mode', 'FT8') === 'FT4' ? 'FT4' : 'FT8');
 if (store.get('ft8', false)) ft8Set(true);
 $('demo').addEventListener('click', startDemo);
 $('help').addEventListener('click', () => { $('helptext').hidden = !$('helptext').hidden; });
