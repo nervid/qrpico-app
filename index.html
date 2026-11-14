@@ -1167,15 +1167,15 @@ function ft8Log() {
   store.set('ft8log', qsos);
   log(`FT8: logged ${Q.his} ${Q.hisGrid} sent ${Q.sentRpt} rcvd ${Q.rcvdRpt} (${qsos.length} QSOs in the log)`);
 }
-// transmit in our slot: load the symbols and key the board ~0.4 s after the slot start (the waveform then
-// starts near +0.5 s); waits for the previous slot's decode up to +2 s (slow phones), then skips the slot
+// transmit in our slot: load the symbols and key the board 0.3 s after the slot start (the TX sequence
+// takes ~0.2 s, so the waveform starts near +0.5 s: jt9 measured DT +0.1 s with 0.4 s); waits for the previous slot's decode up to +2 s (slow phones), then skips the slot
 function ft8TxTick() {
   const now = Date.now() / 1000, slot = Math.floor(now / 15) * 15, into = now - slot;
   if (Q.txing) {
     if (!S.status || now > Q.end || (S.status.txState === 0 && now - Q.txSlot > 2)) ft8TxEnd();
     return;
   }
-  if (!Q.en || !Q.msg || !link || slotParity(slot) !== Q.parity || Q.txSlot === slot || into < 0.4 || into > 2.0) return;
+  if (!Q.en || !Q.msg || !link || slotParity(slot) !== Q.parity || Q.txSlot === slot || into < 0.3 || into > 2.0) return;
   if (F.busy) return;                                     // the previous slot may still change the message
   if (TXA.ptt) return;                                     // voice PTT in use
   if (Q.tries >= (Q.step === 'cq' ? 10 : Q.step === '73' ? 1 : 6)) { Q.en = false; log('FT8: no answer, TX stopped'); ft8Show(); return; }
