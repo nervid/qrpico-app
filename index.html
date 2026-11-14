@@ -78,7 +78,9 @@ label.inline { display: flex; gap: 6px; align-items: center; color: var(--muted)
   .mbar button { flex: 1; min-height: 56px; }
   .mbar .ptt { flex: 2.2; width: auto; padding: 0 10px; }
   .mbar button.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
-  body { padding-bottom: calc(80px + env(safe-area-inset-bottom)); }
+  /* the page scrolls as a whole; room below the content for the bar */
+  html, body { height: auto; }
+  main { height: auto; padding-bottom: calc(88px + env(safe-area-inset-bottom)); }
   button, select, input:not([type=range]):not([type=checkbox]) { min-height: 44px; padding: 8px 10px; font-size: 16px; }
   input[type=range] { min-height: 32px; }
   input[type=checkbox] { width: 22px; height: 22px; }
@@ -1091,7 +1093,12 @@ async function micOn() {
       TXA.raf = requestAnimationFrame(meter);
     };
     meter();
-  } catch (e) { log(`microphone: ${e.name}: ${e.message}`); micOff(); }
+  } catch (e) {
+    log(`microphone: ${e.name}: ${e.message}`);
+    if (e.name === 'NotAllowedError')
+      log('microphone: allow it for this site (icon left of the address → Permissions) and, on Android, for Chrome itself (Settings → Apps → Chrome → Permissions → Microphone)');
+    micOff();
+  }
 }
 function applyMic() {
   if (!TXA.ctx) return;
