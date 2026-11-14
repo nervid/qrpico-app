@@ -70,12 +70,19 @@ label.inline { display: flex; gap: 6px; align-items: center; color: var(--muted)
 .chip.tx { color: #fff; background: #c62828; border-color: #c62828; font-weight: 700; }
 .ptt { width: 100%; padding: 14px; font-size: 16px; font-weight: 700; letter-spacing: 0.04em; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 .stepbtn { min-width: 2.4em; font-weight: 700; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.mbar { display: none; }
 /* touch screens: larger targets (about 44 px), larger frequency, the PTT button taller */
 @media (pointer: coarse) {
-  button, select, input:not([type=range]):not([type=checkbox]) { min-height: 44px; padding: 8px 14px; font-size: 16px; }
+  .mbar { display: flex; gap: 8px; position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
+          background: var(--panel); border-top: 1px solid var(--line); box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.25); }
+  .mbar button { flex: 1; min-height: 56px; }
+  .mbar .ptt { flex: 2.2; width: auto; padding: 0 10px; }
+  .mbar button.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  body { padding-bottom: calc(80px + env(safe-area-inset-bottom)); }
+  button, select, input:not([type=range]):not([type=checkbox]) { min-height: 44px; padding: 8px 10px; font-size: 16px; }
   input[type=range] { min-height: 32px; }
   input[type=checkbox] { width: 22px; height: 22px; }
-  .freq { font-size: 24px; width: 11ch; }
+  #freq { font-size: 22px; width: 10.5ch; padding: 4px 6px; }
   .ptt { padding: 22px; font-size: 18px; }
   header { gap: 6px 10px; padding: 8px 12px; }
   .chip { font-size: 11px; }
@@ -215,6 +222,12 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
     </details>
   </aside>
 </main>
+<!-- touch screens: Listen, Mute and a tap-to-toggle PTT always in reach -->
+<div id="mbar" class="mbar" role="toolbar" aria-label="Quick controls">
+  <button id="mlisten">Listen</button>
+  <button id="mmute">Mute</button>
+  <button id="mptt" class="ptt" aria-pressed="false">PTT</button>
+</div>
 <script>
 'use strict';
 // ---------------------------------------------------------------- protocol (docs/usb-protocol.md)
@@ -871,6 +884,7 @@ function stopListen() {
   if (A.ctx) A.ctx.close();
   Object.assign(A, { ctx: null, stream: null, gain: null, an: null, node: null, stats: null });
   $('listen').textContent = 'Listen'; $('listen').classList.add('primary'); $('listen').classList.remove('active'); $('alevel').style.width = '0';
+  $('mlisten').textContent = 'Listen'; $('mlisten').classList.remove('active');
 }
 async function listen() {
   if (A.ctx) { stopListen(); store.set('listening', false); return; }
@@ -905,6 +919,7 @@ async function listen() {
     await applySink();
     if (A.ctx.state === 'suspended') await A.ctx.resume();
     $('listen').textContent = 'Stop'; $('listen').classList.remove('primary'); $('listen').classList.add('active');
+    $('mlisten').textContent = 'Stop'; $('mlisten').classList.add('active');
     store.set('listening', true);
     const buf = new Float32Array(A.an.fftSize);
     const meter = () => {
@@ -1006,18 +1021,23 @@ function micOff() {
 async function micOn() {
   if (TXA.ctx) { micOff(); return; }
   try {
-    const ds = await fillAudioSelects(await audioDevices());
+    // one permission request only (Android grants "this time" once: a second request is dismissed);
+    // the device names are readable while this stream runs
     const ctx = TXA.ctx = new AudioContext({ latencyHint: 'interactive' });
-    // never the board's own RX audio as the microphone: if the system default input is the board, take the first other input
+    const open = id => navigator.mediaDevices.getUserMedia({ audio: { ...(id ? { deviceId: { exact: id } } : {}),
+      channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
     let micId = $('mic').value;
+    TXA.stream = await open(micId);
+    const ds = await fillAudioSelects(await navigator.mediaDevices.enumerateDevices());
+    // never the board's own RX audio as the microphone: if the system default input is the board, take the first other input
     if (!micId && defaultIsBoard(ds)) {
       const other = ds.find(d => d.kind === 'audioinput' && d.deviceId !== 'default' && d.deviceId !== 'communications' && !isBoard(d, ds));
+      TXA.stream.getTracks().forEach(t => t.stop());
       if (!other) throw new Error('the only audio input is the board itself: connect a microphone');
       micId = other.deviceId;
       log(`microphone: the system default input is the board, using "${other.label}" instead`);
+      TXA.stream = await open(micId);
     }
-    TXA.stream = await navigator.mediaDevices.getUserMedia({ audio: { ...(micId ? { deviceId: { exact: micId } } : {}),
-      channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
     const src = ctx.createMediaStreamSource(TXA.stream);
     // speech band 250-2800 Hz, optional compressor, gain, meter, PTT gate
     const hp = new BiquadFilterNode(ctx, { type: 'highpass', frequency: 250, Q: 0.7 });
@@ -1071,7 +1091,7 @@ async function micOn() {
       TXA.raf = requestAnimationFrame(meter);
     };
     meter();
-  } catch (e) { log('microphone: ' + e.message); micOff(); }
+  } catch (e) { log(`microphone: ${e.name}: ${e.message}`); micOff(); }
 }
 function applyMic() {
   if (!TXA.ctx) return;
@@ -1085,8 +1105,10 @@ function applyMic() {
 async function setPtt(on, fromBoard = false) {
   if (on === TXA.ptt) return;
   TXA.ptt = on;
+  if (on) TXA.pttSince = Date.now();
   const b = $('ptt'); b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on));
   b.textContent = on ? 'TX – release to receive' : 'PTT (hold, or Space)';
+  mbarPtt();
   applyMic();
   if (TXA.node) TXA.node.port.postMessage({ on });
   clearInterval(TXA.ka);
@@ -1268,7 +1290,7 @@ window.addEventListener('keydown', e => {
   else if (e.key === 'ArrowDown') tune(S.wanted - 1000);
   else if (e.key === 'u' || e.key === 'U') setMode('usb');
   else if (e.key === 'l' || e.key === 'L') setMode('lsb');
-  else if (e.key === 'm' || e.key === 'M') { $('amute').checked = !$('amute').checked; applyAudio(); }
+  else if (e.key === 'm' || e.key === 'M') { $('amute').checked = !$('amute').checked; applyAudio(); $('amute').dispatchEvent(new Event('input')); }
   else if (['1', '2', '3'].includes(e.key)) document.querySelector(`[data-band="${4 - Number(e.key)}"]`).click();
   else return;
   e.preventDefault();
@@ -1290,6 +1312,27 @@ document.querySelectorAll('[data-mode]').forEach(b => b.classList.toggle('active
 ['dbmin', 'dbmax', 'hidelo'].forEach(id => $(id).addEventListener('input', drawSpectrum));
 ['wfmin', 'wfmax'].forEach(id => $(id).addEventListener('input', () => { $('wfauto').checked = false; }));
 $('listen').addEventListener('click', listen);
+// quick bar (touch screens): PTT toggles with a tap (holding a glass button for a whole over is tiring);
+// the first tap switches the microphone on if needed. The board still ends TX at its time-out and
+// 1 s after the app's keepalives stop (screen off, app in the background).
+function mbarPtt() {
+  const m = $('mptt'); m.classList.toggle('on', TXA.ptt); m.setAttribute('aria-pressed', String(TXA.ptt));
+  m.textContent = TXA.ptt ? `TX ${Math.floor((Date.now() - TXA.pttSince) / 1000)} s – tap to stop` : 'PTT (tap)';
+}
+setInterval(() => { if (TXA.ptt) mbarPtt(); }, 500);
+mbarPtt();
+$('mptt').addEventListener('contextmenu', e => e.preventDefault());
+$('mptt').addEventListener('click', async () => {
+  if (TXA.ptt) { setPtt(false); return; }
+  if (!TXA.ctx) { await micOn(); if (!TXA.ctx) return; }
+  setPtt(true);
+});
+$('mlisten').addEventListener('click', listen);
+$('mmute').addEventListener('click', () => {
+  $('amute').checked = !$('amute').checked; applyAudio();
+  $('mmute').classList.toggle('active', $('amute').checked); $('mmute').textContent = $('amute').checked ? 'Muted' : 'Mute';
+});
+$('amute').addEventListener('input', () => { $('mmute').classList.toggle('active', $('amute').checked); $('mmute').textContent = $('amute').checked ? 'Muted' : 'Mute'; });
 $('aout').addEventListener('change', () => { remember($('aout'), 'aout'); applySink(); });
 $('ain').addEventListener('change', () => { remember($('ain'), 'ain'); if (A.ctx) { stopListen(); listen(); } });
 $('mic').addEventListener('change', () => remember($('mic'), 'mic'));
