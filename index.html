@@ -271,7 +271,8 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
         <div id="wsprro" class="readout"></div>
       </div>
       <p class="note" style="margin:0">WSPR band: audio 1400 – 1600 Hz at the WSPR dial frequency. Tap / click to set the TX frequency (red).</p>
-      <div class="row"><button id="wsprdial" title="Tune to the WSPR dial frequency of this band (USB)">WSPR frequency</button><button id="wspron">Decode WSPR</button><button id="wsprclear">Clear</button></div>
+      <div class="row"><button id="wsprdial" title="Tune to the WSPR dial frequency of this band (USB)">WSPR frequency</button><button id="wspron">Decode WSPR</button><button id="wsprclear">Clear</button><button id="wsprfcb" title="Compare the frequencies of our spots with what other stations reported for the same transmissions (wspr.live, read only)">Freq. check</button></div>
+      <p class="note" id="wsprfc" hidden></p>
       <div class="freqwarn" id="wsprfw" role="status" hidden><span></span><button type="button">Tune</button></div>
       <p class="note" id="wsprst">Decodes every 2-minute period (from the even minute) of the board's receive audio. Clock within about ±1 s.</p>
       <div class="field">
@@ -353,10 +354,10 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
   <button id="mmute">Mute</button>
   <button id="mptt" class="ptt" aria-pressed="false">PTT</button>
 </div>
-<script src="ft8.js?v=d02db6d"></script>
-<script src="ft4.js?v=d02db6d"></script>
-<script src="wspr.js?v=d02db6d"></script>
-<script src="cw.js?v=d02db6d"></script>
+<script src="ft8.js?v=f500c98"></script>
+<script src="ft4.js?v=f500c98"></script>
+<script src="wspr.js?v=f500c98"></script>
+<script src="cw.js?v=f500c98"></script>
 <script>
 'use strict';
 // ---------------------------------------------------------------- protocol (docs/usb-protocol.md)
@@ -1219,7 +1220,7 @@ function ft8Tick() {
   }
   if (have < m.need) { $('ft8st').textContent = `slot ${hms(slot)}: only ${(have / 12000).toFixed(1)} s of audio, not decoded`; return; }
   if (!F.worker) {
-    F.worker = new Worker('ft8worker.js?v=d02db6d');
+    F.worker = new Worker('ft8worker.js?v=f500c98');
     F.worker.onmessage = e => ft8Result(e.data);
     F.worker.onerror = e => { F.busy = false; log('FT8 worker: ' + e.message); };
   }
@@ -1804,7 +1805,7 @@ function wsprTick() {
       if (have < 100 * 12000) $('wsprst').textContent = `period ${hm(period)}: only ${(have / 12000).toFixed(0)} s of audio, not decoded`;
       else {
         if (!WS.worker) {
-          WS.worker = new Worker('wsprworker.js?v=d02db6d');
+          WS.worker = new Worker('wsprworker.js?v=f500c98');
           WS.worker.onmessage = e => wsprResult(e.data);
           WS.worker.onerror = e => { WS.busy = false; log('WSPR worker: ' + e.message); };
         }
@@ -1815,11 +1816,62 @@ function wsprTick() {
     }
   }
   wsprTxTick(now, period, into);
+  wfcTick(now);
+}
+// Frequency check (optional): about 5 min after a period (uploads take a while) wspr.live is asked what the
+// other receivers reported for the transmitters we decoded; per transmitter ours - their median, over the
+// recent spots the median of those in ppm = the error of our receive frequency (no TX needed, read only).
+const WFC = { on: false, queue: [], pairs: [] };
+const wfcBand = f => f < 8e6 ? 7 : f < 15e6 ? 14 : f < 22e6 ? 21 : 28;
+function wfcQueue(period, dial, spots) {
+  const calls = [...new Set(spots.map(d => d.call).filter(c => /^[A-Z0-9/]{3,12}$/.test(c)))];
+  if (!calls.length) return;
+  WFC.queue.push({ period, due: period + 120 + 300, tries: 0, band: wfcBand(dial),
+                   ours: spots.filter(d => calls.includes(d.call)).map(d => ({ call: d.call, f: dial + d.freq })) });
+  wfcShow();
+}
+function wfcTick(now) {
+  if (!WFC.on || WFC.busy) return;
+  const q = WFC.queue.find(x => now >= x.due);
+  if (!q) return;
+  WFC.busy = true;
+  const t = new Date(q.period * 1000).toISOString().slice(0, 19).replace('T', ' ');
+  const me = $('ft8call').value.trim().toUpperCase().replace(/'/g, '');
+  const sql = `SELECT tx_sign, rx_sign, frequency FROM wspr.rx WHERE time = '${t}' AND band = ${q.band} AND tx_sign IN (${q.ours.map(o => `'${o.call}'`).join(',')}) AND rx_sign != '${me}' FORMAT JSON`;
+  fetch('https://db1.wspr.live/?query=' + encodeURIComponent(sql)).then(r => r.json()).then(j => {
+    let got = 0;
+    for (const o of q.ours) {
+      const f = j.data.filter(x => x.tx_sign === o.call).map(x => Number(x.frequency)).sort((a, b) => a - b);
+      if (f.length < 3) continue;
+      const med = f[f.length >> 1];
+      WFC.pairs.push({ t: q.period, call: o.call, ppm: (o.f - med) / med * 1e6, n: f.length, f: med }); got++;
+    }
+    if (!got && ++q.tries < 2) { q.due += 300; return; }  // uploads late: once more 5 min later
+    WFC.queue.splice(WFC.queue.indexOf(q), 1);
+  }).catch(e => { log('WSPR freq. check: ' + e.message); q.due += 300; if (++q.tries >= 3) WFC.queue.splice(WFC.queue.indexOf(q), 1); })
+    .finally(() => { WFC.busy = false; wfcShow(); });
+}
+function wfcShow() {
+  const el = $('wsprfc');
+  el.hidden = !WFC.on;
+  if (!WFC.on) return;
+  const now = Date.now() / 1000, p = WFC.pairs.filter(x => now - x.t < 3 * 3600).slice(-150);
+  const waiting = WFC.queue.length ? `, ${WFC.queue.length} period${WFC.queue.length === 1 ? '' : 's'} waiting for reports` : '';
+  if (p.length < 3) { el.textContent = `Frequency check: ${p.length} spot${p.length === 1 ? '' : 's'} compared so far${waiting}.`; return; }
+  const v = p.map(x => x.ppm).sort((a, b) => a - b), med = v[v.length >> 1];
+  // spread of the per-transmitter values (MAD); at least the 1 Hz steps of the reports (0.3 Hz rms)
+  const mad = v.map(x => Math.abs(x - med)).sort((a, b) => a - b)[v.length >> 1];
+  const se = Math.max(1.25 * 1.48 * mad, 0.3 / (p[0].f || 1e7) * 1e6) / Math.sqrt(v.length);
+  const senders = new Set(p.map(x => x.call)).size;
+  el.textContent = `Frequency check: our receive frequency ${med >= 0 ? '+' : ''}${med.toFixed(2)} ppm ± ${se.toFixed(2)} against the other receivers ` +
+    `(${p.length} spots, ${senders} transmitters, last 3 h${waiting})` +
+    (Math.abs(med) > 1 && Math.abs(med) > 2 * se ? ' - more than 1 ppm off: measure the crystal (FT8 tab, Measure).' : '.');
 }
 function wsprResult(r) {
   WS.busy = false;
   const usb = (S.status ? S.status.mode : modeNames.indexOf(S.mode)) !== 2, dial = S.wanted, me = gridLL($('ft8grid').value);
   $('wsprst').textContent = `period ${hm(r.period)}: ${r.spots.length} spot${r.spots.length === 1 ? '' : 's'}, ${(r.ms / 1000).toFixed(1)} s`;
+  if (WFC.on && r.spots.length && usb) wfcQueue(r.period, dial, r.spots);
   const list = $('wsprlist'), frag = document.createDocumentFragment();
   r.spots.forEach((d, i) => {
     const row = document.createElement('div'), ll = gridLL(d.grid);
@@ -1942,6 +1994,10 @@ function wsprWfOverlay() {
   $('wsprtxf').addEventListener('change', () => { store.set('wsprtxf', $('wsprtxf').value); wsprWfOverlay(); });
   $('wsprpct').addEventListener('change', () => { store.set('wsprpct', $('wsprpct').value); wsprShow(); });
   $('wspron').addEventListener('click', () => wsprSet(!WS.on));
+  WFC.on = store.get('wsprfc', false); $('wsprfcb').classList.toggle('active', WFC.on); wfcShow();
+  $('wsprfcb').addEventListener('click', () => {
+    WFC.on = !WFC.on; store.set('wsprfc', WFC.on); $('wsprfcb').classList.toggle('active', WFC.on); wfcShow();
+  });
   $('wsprclear').addEventListener('click', () => { $('wsprlist').textContent = ''; WS.spots = []; wsprWfOverlay(); });
   $('wsprdial').addEventListener('click', () => {
     const b = (S.status && S.status.band) || 2;
