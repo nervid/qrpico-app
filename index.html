@@ -1042,13 +1042,17 @@ function ft8Collect(first, s) {
   for (let i = 0; i < s.length; i++) F.ring[(first + i) % N] = s[i] / 32768;
   F.next = first + s.length;
   const now = Date.now() / 1000, est = now - F.next / 12000;
-  if (F.offs === null || est < F.offs || now - F.offsAt > 30) { F.offs = est; F.offsAt = now; }
+  // a frame much later than the mapping says: the stream paused (the board sends no RX audio while it
+  // transmits, the sample index then resumes where it stopped) - take the new mapping at once
+  if (F.offs === null || est < F.offs || est > F.offs + 0.25 || now - F.offsAt > 30) { F.offs = est; F.offsAt = now; }
 }
 function ft8Tick() {
   if (!F.on || F.offs === null || F.busy) return;
   const now = Date.now() / 1000, slot = Math.floor(now / 15) * 15;
   if (now - slot < 13.6 || slot === F.lastSlot) return;
   F.lastSlot = slot;
+  // our own TX slot: no receive audio in it (and the mapping across the pause is not exact)
+  if (Q.txSlot === slot) { $('ft8st').textContent = `slot ${hms(slot)}: own transmission`; return; }
   const i0 = Math.round((slot - F.offs) * 12000), N = F.ring.length, audio = new Float32Array(180000);
   let have = 0;
   for (let i = 0; i < 180000; i++) {
