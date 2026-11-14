@@ -1,7 +1,7 @@
 // FT8 / FT4 decoding off the page's main thread: one slot (12 kS/s) per message, results back.
 // The hash book (calls heard in full, to name <...> calls) lives as long as the worker.
 'use strict';
-importScripts('ft8.js?v=f500c98', 'ft4.js?v=f500c98');
+importScripts('ft8.js?v=f6d86b9', 'ft4.js?v=f6d86b9');
 const hashes = new FT8.HashBook();
 onmessage = e => {
   const { slot, mode, audio, opt } = e.data;
