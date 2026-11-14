@@ -28,15 +28,17 @@ class CwDecoder {
   constructor(onText, opt = {}) {
     this.onText = onText;
     this.pitch = opt.pitch || 600;        // Hz, followed
-    this.minSnrDb = opt.minSnrDb || 13;
-    this.open = false;                    // squelch
+    this.toneOpen = opt.toneOpen || 5;    // squelch: tone-to-noise ratio of the spectrum to open, and to stay open
+    this.toneHold = opt.toneHold || 2.5;
+    this.open = false; this.below = 0; this.closedFor = 0; this.tone = 0;
     this.peak = 1e-9;
     this.ph = 0; this.accN = 0; this.ar = 0; this.ai = 0; this.hr = []; this.hi = []; this.lvlN = 0; this.pend = 0;
     this.fbuf = new Float32Array(NFFT); this.fn = 0; this.sinceFft = 0;
     this.env = [];                        // recent envelope values (for the noise floor)
     this.sig = 1e-9; this.noise = 1e-9;
     this.key = false; this.run = 0;       // current state and its length in envelope steps
-    this.dot = 600 / (opt.wpm || 20);     // dot length in envelope steps (2 ms)
+    this.wpm0 = opt.wpm || 20;
+    this.dot = 600 / this.wpm0;           // dot length in envelope steps (2 ms)
     this.t = 0;                           // envelope steps so far; evT: the time of the event being judged
     this.fit = 0.5; this.bad = 0.5;       // timing misfit and share of unknown characters (lower: better)
     this.delta = 0;                       // marks measure this much longer, spaces shorter (steps)
@@ -46,7 +48,7 @@ class CwDecoder {
     for (let i = 0; i < NFFT; i++) this.win[i] = 0.5 - 0.5 * Math.cos(2 * Math.PI * (i + 0.5) / NFFT);
   }
   info() {
-    return { wpm: Math.round(1200 / (this.dot * HOP / FS * 1000)), snrDb: Math.round(20 * Math.log10(this.sig / this.noise)),
+    return { wpm: Math.round(1200 / (this.dot * HOP / FS * 1000)), snrDb: Math.round(20 * Math.log10(this.sig / this.noise)), open: this.open,
              pitch: Math.round(this.pitch), uncertain: this.unc };
   }
   push(x) {                               // Float32Array of 12 kS/s audio
@@ -68,22 +70,54 @@ class CwDecoder {
       }
     }
     this.sinceFft += x.length;
-    if (this.sinceFft >= NFFT && this.fn >= NFFT) { this.sinceFft = 0; this.trackPitch(); }
+    if (this.sinceFft >= NFFT / 2 && this.fn >= NFFT) { this.sinceFft = 0; this.trackPitch(); }
   }
+  // every 171 ms (4096-point spectrum, 341 ms): pitch, and the squelch from a narrow tone in 300 ... 900 Hz:
+  // power within +-17 Hz of the strongest bin against the median bin. Noise alone gives about 2, a keyed
+  // carrier 10 dB below the noise in 500 Hz still about 8. Open at toneOpen in two analyses in a row, closed
+  // after 0.5 s below toneHold (a word gap may close it: reopening replays the last second); 3 s closed: the
+  // timing starts afresh.
   trackPitch() {
     const re = new Float64Array(NFFT), im = new Float64Array(NFFT), o = this.fn % NFFT;
     for (let i = 0; i < NFFT; i++) re[i] = this.fbuf[(o + i) % NFFT] * this.win[i];
     FT8.fft(re, im);
-    const df = FS / NFFT, k0 = Math.round(300 / df), k1 = Math.round(900 / df);
-    let best = k0, bp = 0, sum = 0;
-    for (let k = k0; k <= k1; k++) { const p = re[k] * re[k] + im[k] * im[k]; sum += p; if (p > bp) { bp = p; best = k; } }
-    const ratio = bp / (sum / (k1 - k0 + 1));
-    if (ratio < 10) return;                             // no clear tone
-    const p = k => re[k] * re[k] + im[k] * im[k], a = p(best - 1), b = p(best), c = p(best + 1);
-    const f = (best + 0.5 * (a - c) / (a - 2 * b + c || 1)) * df;
-    // near the current pitch: follow; elsewhere only a clear tone (another station, or a retune) moves it
-    if (Math.abs(f - this.pitch) <= 40) this.pitch += 0.3 * (f - this.pitch);
-    else if (ratio > 40) this.pitch = f;
+    const df = FS / NFFT, k0 = Math.round(300 / df), k1 = Math.round(900 / df), P = new Float64Array(k1 + 8);
+    let best = k0;
+    for (let k = k0 - 7; k <= k1 + 7; k++) P[k] = re[k] * re[k] + im[k] * im[k];
+    for (let k = k0; k <= k1; k++) if (P[k] > P[best]) best = k;
+    const med = Array.from(P.subarray(k0, k1 + 1)).sort((a, b) => a - b)[(k1 - k0) >> 1] + 1e-30;
+    let sum = 0; for (let k = best - 6; k <= best + 6; k++) sum += P[k];
+    const tone = sum / (13 * med / Math.LN2);           // the median of exponential powers is mean x ln 2
+    this.tone = tone;
+    const a = P[best - 1], b = P[best], c = P[best + 1], f = (best + 0.5 * (a - c) / (a - 2 * b + c || 1)) * df;
+    const was = this.open;
+    if (!this.open) {
+      this.pre = tone >= this.toneOpen ? (this.pre || 0) + 1 : 0;
+      if (this.pre >= 2) { this.open = true; this.below = 0; this.pitch = f; }
+    } else {
+      this.below = tone < this.toneHold ? this.below + 1 : 0;
+      if (this.below >= 3) this.open = false;
+      else if (tone >= this.toneHold && Math.abs(f - this.pitch) <= 40) this.pitch += 0.3 * (f - this.pitch);
+    }
+    if (this.open && !was) this.replay();
+    if (!this.open) {
+      this.closedFor += NFFT / 2;
+      if (this.closedFor >= 3 * FS && this.marks.length) this.restart();
+    } else this.closedFor = 0;
+  }
+  // a new station: speed and statistics from the start values
+  restart() {
+    this.dot = 600 / this.wpm0; this.delta = 0; this.marks = []; this.fit = 0.5; this.bad = 0.5; this.nfit = this.nbad = 0;
+  }
+  // just opened: the last 0.55 s again (the squelch opens at most ~0.5 s after the start), with levels from
+  // that stretch (after a pause the AGC has the noise as loud as the signal will be)
+  replay() {
+    this.key = false; this.run = 0; this.pend = 0; this.code = ''; this.charDone = this.wordDone = true;
+    const old = this.env.slice(-275), srt = old.slice().sort((a, b) => a - b);   // 0.55 s, levels from it
+    this.noise = Math.max(1e-9, srt[Math.floor(srt.length * 0.15)]);
+    this.sig = Math.max(this.noise, srt[Math.floor(srt.length * 0.92)]);
+    this.peak = this.sig;
+    old.forEach((v, i) => { this.evT = this.t - old.length + 1 + i; this.detect(v); });
   }
   step(m) {
     // levels from the last 3 s: noise = 15th, signal = 92nd percentile (key down is 30 - 60 % of the time);
@@ -97,24 +131,16 @@ class CwDecoder {
       this.noise = Math.max(1e-9, s[Math.floor(s.length * 0.15)]);
       this.sig = Math.max(this.noise, s[Math.floor(s.length * 0.92)]);
     }
-    // pure noise gives about 10 dB between these percentiles (Rayleigh): the squelch opens at minSnrDb
-    // and closes 5 dB lower (a run of dashes pulls the noise percentile up)
-    const snr = 20 * Math.log10(this.sig / this.noise), was = this.open;
-    this.open = snr >= this.minSnrDb - (this.open ? 5 : 0);
-    if (this.open && !was) {
-      // just opened: the last second again with the levels known now (the start of the transmission)
-      this.key = false; this.run = 0; this.pend = 0; this.code = ''; this.charDone = this.wordDone = true;
-      const old = this.env.slice(-500);
-      old.forEach((v, i) => { this.evT = this.t - old.length + 1 + i; this.detect(v); });
-    } else { this.evT = this.t; this.detect(m); }
+    this.evT = this.t; this.detect(m);
     this.t++;
   }
   detect(m) {
     const top = Math.max(this.sig, 0.6 * this.peak), mid = Math.sqrt(top * this.noise);
     const want = this.open && (this.key ? m > mid / 1.2 : m > mid * 1.2);
-    // a change counts once it has held for a fifth of a dot (2 steps at least): glitches are merged
+    // a change counts once it has held (key down 0.35, key up 0.2 dot, 2 steps at least): noise spikes in
+    // the gaps and short dropouts in the marks are merged
     if (want !== this.key) {
-      if (++this.pend >= Math.max(2, Math.round(this.dot / 5))) {
+      if (++this.pend >= Math.max(2, Math.round(this.dot * (want ? 0.35 : 0.2)))) {
         const held = this.pend;
         if (this.key) this.mark(this.run); else this.space(this.run);
         this.key = want; this.run = held; this.pend = 0;
@@ -129,7 +155,9 @@ class CwDecoder {
     this.updateDot();
     const r = (n - this.delta) / this.dot;
     this.code += r < 2 ? '.' : '-';
-    this.fit += 0.1 * (Math.min(Math.abs(r - 1), Math.abs(r - 3) / 3) - this.fit);
+    this.nfit = (this.nfit || 0) + 1;      // a plain mean over the first ten marks, then a slow average
+    this.fit += Math.max(0.1, 1 / this.nfit) * (Math.min(Math.abs(r - 1), Math.abs(r - 3) / 3) - this.fit);
+    if (this.fit > 0.45 && this.marks.length >= 12) this.restart();   // lost the speed: start again
     if (r > 1.6 && r < 2.4) this.unc = true;
     this.charDone = this.wordDone = false;
   }
@@ -164,7 +192,8 @@ class CwDecoder {
   }
   emitChar() {
     const c = DECODE[this.code];
-    this.bad += 0.1 * ((c ? 0 : 1) - this.bad);
+    this.nbad = (this.nbad || 0) + 1;
+    this.bad += Math.max(0.1, 1 / this.nbad) * ((c ? 0 : 1) - this.bad);
     this.emit(c || '_', !c || this.unc);
     this.code = ''; this.unc = false;
   }
@@ -174,20 +203,28 @@ class CwDecoder {
 
 // Three decoders that start at 12, 20 and 30 wpm: a wrong start can lock one (too slow a start merges the
 // gaps of fast CW, too fast a start lets noise chop slow CW); the text comes from the one whose marks fit
-// the 1 : 3 timing best and that finds the fewest unknown characters, by time stamp (no repeats).
+// the 1 : 3 timing best and that finds the fewest unknown characters, by time stamp (no repeats), 1.2 s
+// late so that a new station's first characters come from the decoder that suits it.
 class CwMulti {
   constructor(onText, opt = {}) {
     this.onText = onText; this.best = 1; this.lastT = -1;
-    this.d = [12, 20, 30].map((wpm, k) => new CwDecoder((t, i) => this.text(k, t, i), Object.assign({}, opt, { wpm })));
+    this.delay = opt.delay || 600;          // output 1.2 s late: time to pick the decoder of a new station
+    this.q = [[], [], []];
+    this.d = [12, 20, 30].map((wpm, k) => new CwDecoder((t, i) => this.q[k].push([t, i]), Object.assign({}, opt, { wpm })));
   }
-  text(k, t, info) {
-    const sc = this.d.map(x => x.score());
-    if (sc[this.best] - Math.min(...sc) > 0.05) this.best = sc.indexOf(Math.min(...sc));
-    if (k !== this.best || info.t <= this.lastT) return;
-    this.lastT = info.t;
-    this.onText(t, info);
+  push(x) {
+    for (const d of this.d) d.push(x);
+    const sc = this.d.map(x => x.score()), lo = Math.min(...sc);
+    if (sc[this.best] - lo > 0.05) this.best = sc.indexOf(lo);
+    const now = this.d[0].t;
+    for (let k = 0; k < 3; k++) {
+      const q = this.q[k];
+      while (q.length && q[0][1].t <= now - this.delay) {
+        const [t, info] = q.shift();
+        if (k === this.best && info.t > this.lastT) { this.lastT = info.t; this.onText(t, info); }
+      }
+    }
   }
-  push(x) { for (const d of this.d) d.push(x); }
   info() { return this.d[this.best].info(); }
 }
 
