@@ -213,7 +213,7 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
       <p class="note" id="ft8st">Decodes every 15 s slot from the board's receive audio (USB, e.g. 14.074 MHz). Needs the PC / phone clock within about ±1 s (NTP).</p>
       <div class="field" style="margin-top:6px">
         <span>my call</span><input id="ft8call" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="e.g. OE3XYZ" aria-label="My call sign">
-        <span>my grid</span><input id="ft8grid" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="e.g. JN88" maxlength="4" aria-label="My 4-character locator">
+        <span>my grid</span><input id="ft8grid" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="e.g. JN88ee" maxlength="6" aria-label="My locator, 4 or 6 characters">
         <span>TX audio</span><div class="row"><input id="ft8txf" type="number" min="200" max="2900" step="1" value="1500" aria-label="TX audio frequency in Hz" style="width:7em"><span class="unit">Hz</span></div>
       </div>
       <div class="row" style="margin-top:6px"><button id="ft8en" title="Master switch: transmissions only while this is on">Enable TX</button><button id="ft8cq">CQ</button><button id="ft8halt">Halt</button></div>
@@ -564,6 +564,8 @@ function onFrame(type, flags, p) {
   if (type === T_TEXT) {
     const t = dec.decode(p); log(t);
     if (/^ptt on: /.test(t) && !/^ptt on: ok/.test(t) && TXA.ptt) setPtt(false, true);   // refused by the board
+    const st = t.match(/^station: call (\S+) grid (\S+) power ([\d.]+) ft8hz (\d+)/m);
+    if (st) stationApply(st[1], st[2], Number(st[3]), Number(st[4]));
   }
   else if (type === T_SPECTRUM) { S.spec = parseSpectrum(p); if (!S.status) S.wanted = S.spec.wanted; drawSpectrum(); pushWaterfall(); }
   else if (type === T_STATUS) { S.status = parseStatus(p); updateStatus(); txRate(); }
@@ -1090,9 +1092,19 @@ const slotParity = t => Math.floor(t / 15) % 2;           // 0: :00 / :30, 1: :1
 const rptText = snr => { const v = Math.max(-30, Math.min(49, Math.round(snr))); return (v < 0 ? '-' : '+') + String(Math.abs(v)).padStart(2, '0'); };
 const isGrid = w => /^[A-R]{2}[0-9]{2}$/.test(w) && w !== 'RR73';
 function ft8Settings() {
-  Q.my = $('ft8call').value.trim().toUpperCase(); Q.grid = $('ft8grid').value.trim().toUpperCase();
-  store.set('ft8call', Q.my); store.set('ft8grid', Q.grid); store.set('ft8txf', $('ft8txf').value);
+  Q.my = $('ft8call').value.trim().toUpperCase(); Q.grid = $('ft8grid').value.trim().slice(0, 4).toUpperCase();   // FT8 sends 4
+  store.set('ft8call', Q.my); store.set('ft8grid', $('ft8grid').value.trim()); store.set('ft8txf', $('ft8txf').value);
 }
+// station data live in the board's flash (console 'station'): read on connect, written on change
+function stationApply(call, grid, power, ft8hz) {
+  S.station = { call, grid, power, ft8hz };
+  if (call !== '-') $('ft8call').value = call;
+  if (grid !== '-') $('ft8grid').value = grid;
+  $('ft8txf').value = String(ft8hz);
+  $('txpwr').value = String(power); store.set('txpwr', String(power)); showPwr();
+  ft8Settings();
+}
+function stationSet(key, value) { if (link && link.kind === 'usb') cmd(`station ${key} ${value === '' ? '-' : value}`); }
 function ft8Show() {
   const el = $('ft8txmsg');
   el.classList.toggle('tx', Q.txing);
@@ -1191,6 +1203,9 @@ $('ft8en').addEventListener('click', () => { if (!Q.en && !ft8Check()) return; Q
 $('ft8cq').addEventListener('click', () => { ft8Cq(); });
 $('ft8halt').addEventListener('click', ft8Halt);
 ['ft8call', 'ft8grid', 'ft8txf'].forEach(id => $(id).addEventListener('change', ft8Settings));
+$('ft8call').addEventListener('change', () => stationSet('call', $('ft8call').value.trim().toUpperCase()));
+$('ft8grid').addEventListener('change', () => stationSet('grid', $('ft8grid').value.trim()));
+$('ft8txf').addEventListener('change', () => stationSet('ft8hz', String(Math.round(Number($('ft8txf').value) || 1500))));
 $('ft8call').value = store.get('ft8call', ''); $('ft8grid').value = store.get('ft8grid', ''); $('ft8txf').value = store.get('ft8txf', '1500');
 ft8Settings();
 
@@ -1547,15 +1562,17 @@ function showPwr() {
   $('txpwrv').classList.toggle('warnnote', cap < l);
 }
 function pwrText(l) { return `${l.toFixed(2)} ≈ ${(5.4 * l * l).toFixed(l < 0.3 ? 2 : 1)} W`; }   // board 1: 4.8 W at 0.94
-let pwrTimer = 0;
+let pwrTimer = 0, pwrStoreTimer = 0;
 function sendPower() { cmd(`txb limit ${Number($('txpwr').value).toFixed(2)}`, true); }
+// the slider acts at once; it is stored on the board (flash) when it has rested for 3 s
 $('txpwr').addEventListener('input', () => {
   showPwr(); store.set('txpwr', $('txpwr').value);
   clearTimeout(pwrTimer); pwrTimer = setTimeout(sendPower, 250);
+  clearTimeout(pwrStoreTimer); pwrStoreTimer = setTimeout(() => stationSet('power', Number($('txpwr').value).toFixed(2)), 3000);
 });
 function afterConnect() {
   if (link) {
-    sendPower();
+    cmd('station', true);                // station data from the board's flash (fills call, grid, power, TX Hz)
     if (A.node || F.on) cmd('stream audio on', true);
     if (!A.ctx && store.get('listening', false)) listen();
     if (TXA.node) cmd('stream txaudio on', true);
