@@ -99,6 +99,9 @@ label.inline { display: flex; gap: 6px; align-items: center; color: var(--muted)
 .ft8row.me > span:last-child { color: var(--warn); font-weight: 700; }
 .ft8row.mine > span:last-child { color: var(--muted); font-style: italic; }
 #ft8txmsg.tx { color: var(--warn); font-weight: 600; }
+.freqwarn { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 4px 0 0; color: var(--warn); font-size: 12px; }
+.freqwarn[hidden] { display: none; }
+.freqwarn.tx { font-weight: 700; }
 #ft8en.active { background: #c62828; border-color: #c62828; color: #fff; }
 /* touch screens: larger targets (about 44 px), larger frequency, the PTT button taller */
 @media (pointer: coarse) {
@@ -228,6 +231,7 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
       </div>
       <p class="note" style="margin:0">WSPR band: audio 1400 – 1600 Hz at the WSPR dial frequency. Tap / click to set the TX frequency (red).</p>
       <div class="row"><button id="wsprdial" title="Tune to the WSPR dial frequency of this band (USB)">WSPR frequency</button><button id="wspron">Decode WSPR</button><button id="wsprclear">Clear</button></div>
+      <div class="freqwarn" id="wsprfw" role="status" hidden><span></span><button type="button">Tune</button></div>
       <p class="note" id="wsprst">Decodes every 2-minute period (from the even minute) of the board's receive audio. Clock within about ±1 s.</p>
       <div class="field">
         <span>TX audio</span><div class="row"><input id="wsprtxf" type="number" min="1410" max="1590" step="1" value="1500" aria-label="WSPR TX audio frequency in Hz" style="width:7em"><span class="unit">Hz</span></div>
@@ -245,6 +249,7 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
       </div>
       <p class="note" style="margin:0">Audio 0 – 3.2 kHz of the USB passband. Tap / click to set the TX frequency (red: your 50 Hz). Calls of the last slot at their frequency.</p>
       <div class="row"><button id="ft8on">Decode FT8</button><button id="ft8clear">Clear</button></div>
+      <div class="freqwarn" id="ft8fw" role="status" hidden><span></span><button type="button">Tune</button></div>
       <p class="note" id="ft8st">Decodes every 15 s slot from the board's receive audio (USB, e.g. 14.074 MHz). Needs the PC / phone clock within about ±1 s (NTP).</p>
       <div class="field" style="margin-top:6px">
         <span>my call</span><input id="ft8call" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="e.g. OE3XYZ" aria-label="My call sign">
@@ -254,6 +259,7 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
       </div>
       <div class="row" style="margin-top:6px"><button id="ft8en" title="Master switch: transmissions only while this is on">Enable TX</button><button id="ft8cq">CQ</button><button id="ft8halt">Halt</button></div>
       <p class="note" id="ft8txmsg">Tap / click a decode to answer that station; the QSO then runs by itself (report, RR73, 73).</p>
+      <div class="row" style="margin-top:6px"><button id="ft8adif" title="Download the QSO log of this browser as an ADIF file (for QRZ, LoTW, Log4OM, ...)">Export ADIF</button><span class="note" id="ft8logn" style="margin:0"></span></div>
       <div class="ft8list" id="ft8list" role="log" aria-label="FT8 decodes"></div>
     </div>
   </section>
@@ -676,6 +682,7 @@ const fmtHz = f => (f / 1e6).toFixed(6);
 function updateStatus() {
   const s = S.status;
   S.wanted = s.wanted;
+  digiWarn();
   if (document.activeElement !== $('freq')) $('freq').value = fmtHz(s.wanted);
   $('st-lo').textContent = `LO ${fmtHz(s.fLo)} MHz, offset ${(s.offset / 1000).toFixed(3)} kHz`;
   const load = s.blkAvg / 2731 * 100;
@@ -1191,6 +1198,9 @@ function ft8Set(on) {
   audioStream();
 }
 $('ft8on').addEventListener('click', () => ft8Set(!F.on));
+$('ft8adif').addEventListener('click', ft8Adif);
+ft8LogCount();
+['ft8fw', 'wsprfw'].forEach(id => $(id).querySelector('button').addEventListener('click', () => { tune(Number($(id).dataset.f)); setMode('usb'); }));
 $('ft8clear').addEventListener('click', () => { $('ft8list').textContent = ''; F.marks = []; drawWfOverlay(); });
 setInterval(ft8Tick, 250);
 
@@ -1221,7 +1231,7 @@ function ft8Show() {
   const el = $('ft8txmsg');
   el.classList.toggle('tx', Q.txing);
   $('ft8en').classList.toggle('active', Q.en); $('ft8en').textContent = Q.en ? 'TX enabled' : 'Enable TX';
-  wakeUpdate();
+  wakeUpdate(); digiWarn();
   if (Q.txing) el.textContent = `TX now: ${Q.msg}`;
   else if (Q.en && Q.msg) el.textContent = `next TX (${Q.parity ? ':15 / :45' : ':00 / :30'}): ${Q.msg}` + (Q.tries ? ` - try ${Q.tries + 1}` : '');
   else if (Q.msg) el.textContent = `ready: ${Q.msg} (Enable TX to send)`;
@@ -1276,9 +1286,53 @@ function ft8Log() {
   if (Q.logged || !Q.his) return;
   Q.logged = true;
   const qsos = store.get('ft8log', []);
-  qsos.push({ t: new Date().toISOString(), call: Q.his, grid: Q.hisGrid, sent: Q.sentRpt, rcvd: Q.rcvdRpt, f: S.wanted, mode: 'FT8' });
+  qsos.push({ t: new Date().toISOString(), call: Q.his, grid: Q.hisGrid, sent: Q.sentRpt, rcvd: Q.rcvdRpt, f: S.wanted, mode: 'FT8',
+    txhz: Number($('ft8txf').value) || 0, my: Q.my, mygrid: $('ft8grid').value.trim().toUpperCase(), dbm: wsprDbm() });
   store.set('ft8log', qsos);
+  ft8LogCount();
   log(`FT8: logged ${Q.his} ${Q.hisGrid} sent ${Q.sentRpt} rcvd ${Q.rcvdRpt} (${qsos.length} QSOs in the log)`);
+}
+function ft8LogCount() { const n = store.get('ft8log', []).length; $('ft8logn').textContent = `${n} QSO${n === 1 ? '' : 's'} in the log of this browser`; }
+// ADIF 3.1 (adif.org): <FIELD:length>value per QSO, <EOR> after each; FREQ = dial + TX audio (the RF of the QSO)
+const BANDS = [[1.8e6, 2e6, '160m'], [3.5e6, 4e6, '80m'], [5.06e6, 5.45e6, '60m'], [7e6, 7.3e6, '40m'], [10.1e6, 10.15e6, '30m'], [14e6, 14.35e6, '20m'],
+  [18.068e6, 18.168e6, '17m'], [21e6, 21.45e6, '15m'], [24.89e6, 24.99e6, '12m'], [28e6, 29.7e6, '10m'], [50e6, 54e6, '6m']];
+function adifText(qsos) {
+  const f = (k, v) => v === undefined || v === null || v === '' ? '' : `<${k}:${String(v).length}>${v} `;
+  let a = `qrpico QSO log, exported ${new Date().toISOString()}\n${f('ADIF_VER', '3.1.4')}${f('PROGRAMID', 'qrpico')}<EOH>\n`;
+  for (const q of qsos) {
+    const t = q.t.replace(/[-:]/g, ''), hz = q.f + (q.txhz || 0), b = BANDS.find(r => hz >= r[0] && hz <= r[1]);
+    a += f('CALL', q.call) + f('GRIDSQUARE', q.grid) + f('MODE', q.mode) + f('QSO_DATE', t.slice(0, 8)) + f('TIME_ON', t.slice(9, 15)) +
+      f('BAND', b && b[2]) + f('FREQ', (hz / 1e6).toFixed(6)) + f('RST_SENT', q.sent) + f('RST_RCVD', q.rcvd) +
+      f('STATION_CALLSIGN', q.my) + f('MY_GRIDSQUARE', q.mygrid) + f('TX_PWR', q.dbm === undefined ? '' : (10 ** (q.dbm / 10) / 1000).toFixed(2)) + '<EOR>\n';
+  }
+  return a;
+}
+function ft8Adif() {
+  const qsos = store.get('ft8log', []);
+  if (!qsos.length) { log('ADIF: the log is empty'); return; }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([adifText(qsos)], { type: 'text/plain' }));
+  a.download = `qrpico_${new Date().toISOString().slice(0, 10).replace(/-/g, '')}.adi`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+  log(`ADIF: ${qsos.length} QSOs exported`);
+}
+// warning in the FT8 / WSPR tab when the dial is not the usual frequency of the band, or the mode is not USB
+const FT8_DIAL = { '40m': 7074000, '20m': 14074000, '10m': 28074000 };
+const WSPR_DIALS = { get '40m'() { return WSPR_DIAL[3]; }, get '20m'() { return WSPR_DIAL[2]; }, get '10m'() { return WSPR_DIAL[1]; } };
+function digiWarn() {
+  const usb = (S.status ? S.status.mode : modeNames.indexOf(S.mode)) === 1, b = BANDS.find(r => S.wanted >= r[0] && S.wanted <= r[1]);
+  [['ft8fw', FT8_DIAL, 'FT8', Q.en], ['wsprfw', WSPR_DIALS, 'WSPR', WS.en]].forEach(([id, tab, name, tx]) => {
+    const el = $(id), want = b && tab[b[2]];
+    let t = '';
+    if (!want) t = `Not in a band with a ${name} frequency (${Object.keys(tab).join(', ')}).`;
+    else if (Math.abs(S.wanted - want) > 10) t = `Not on the usual ${name} frequency of ${b[2]}: dial ${fmtHz(want)} MHz (${S.wanted > want ? '+' : ''}${((S.wanted - want) / 1000).toFixed(1)} kHz now).`;
+    else if (!usb) t = `${name} needs USB.`;
+    el.hidden = !t;
+    el.classList.toggle('tx', !!t && tx);
+    const sp = el.firstChild; if (sp.textContent !== t) sp.textContent = t;
+    el.dataset.f = want || tab['20m'];
+  });
 }
 // transmit in our slot: load the symbols and key the board 0.3 s after the slot start (the TX sequence
 // takes ~0.2 s, so the waveform starts near +0.5 s: jt9 measured DT +0.1 s with 0.4 s); waits for the previous slot's decode up to +2 s (slow phones), then skips the slot
@@ -1450,8 +1504,7 @@ function wsprTick() {
 function wsprResult(r) {
   WS.busy = false;
   const usb = (S.status ? S.status.mode : modeNames.indexOf(S.mode)) !== 2, dial = S.wanted, me = gridLL($('ft8grid').value);
-  $('wsprst').textContent = `period ${hm(r.period)}: ${r.spots.length} spot${r.spots.length === 1 ? '' : 's'}, ${(r.ms / 1000).toFixed(1)} s` +
-    (Object.values(WSPR_DIAL).includes(dial) ? '' : ' - not on a WSPR dial frequency');
+  $('wsprst').textContent = `period ${hm(r.period)}: ${r.spots.length} spot${r.spots.length === 1 ? '' : 's'}, ${(r.ms / 1000).toFixed(1)} s`;
   const list = $('wsprlist'), frag = document.createDocumentFragment();
   r.spots.forEach((d, i) => {
     const row = document.createElement('div'), ll = gridLL(d.grid);
@@ -1495,7 +1548,7 @@ function wsprTxEnd() {
 }
 function wsprShow() {
   $('wspren').classList.toggle('active', WS.en); $('wspren').textContent = WS.en ? 'TX enabled' : 'Enable TX';
-  wakeUpdate();
+  wakeUpdate(); digiWarn();
   const el = $('wsprtxmsg');
   el.classList.toggle('tx', WS.txing);
   if (WS.txing) el.textContent = `TX now: ${WS.msg} (until ${hm(WS.txPeriod + 120)})`;
