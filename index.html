@@ -204,7 +204,7 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
       </div>
       <select id="filter" aria-label="Audio filter" title="Audio filter bandwidth" style="width:auto">
         <option value="0">2.8 kHz</option><option value="1">2.4 kHz</option><option value="2">1.8 kHz</option>
-        <option value="3">500 Hz</option><option value="4">250 Hz</option><option value="5">6 kHz (AM)</option>
+        <option value="3">500 Hz</option><option value="4">250 Hz</option><option value="5">10 kHz (AM)</option>
       </select>
       <div class="group">
         <button id="rxbtn" title="Start or stop the RX chain">RX start</button>
@@ -355,10 +355,10 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
   <button id="mmute">Mute</button>
   <button id="mptt" class="ptt" aria-pressed="false">PTT</button>
 </div>
-<script src="ft8.js?v=87f93b0"></script>
-<script src="ft4.js?v=87f93b0"></script>
-<script src="wspr.js?v=87f93b0"></script>
-<script src="cw.js?v=87f93b0"></script>
+<script src="ft8.js?v=1cc9c47"></script>
+<script src="ft4.js?v=1cc9c47"></script>
+<script src="wspr.js?v=1cc9c47"></script>
+<script src="cw.js?v=1cc9c47"></script>
 <script>
 'use strict';
 // ---------------------------------------------------------------- protocol (docs/usb-protocol.md)
@@ -815,7 +815,7 @@ function displayDb(sp) {
 }
 // audio filters (firmware dsp.h): width and centre in the audio; centre null: the CW pitch
 const FILTERS = [{ w: 2800, c: 1500, name: '2.8k' }, { w: 2400, c: 1500, name: '2.4k' }, { w: 1800, c: 1200, name: '1.8k' },
-                 { w: 500, c: null, name: '500' }, { w: 250, c: null, name: '250' }, { w: 6400, c: 0, name: '6k' }];
+                 { w: 500, c: null, name: '500' }, { w: 250, c: null, name: '250' }, { w: 10000, c: 0, name: '10k' }];
 const curFilter = () => (S.status && S.status.filter !== undefined ? S.status.filter : S.filter) || 0;
 function passband(sp) {
   const w = S.wanted, m = S.status ? S.status.mode : modeNames.indexOf(S.mode), f = FILTERS[curFilter()] || FILTERS[0];
@@ -1226,7 +1226,7 @@ function ft8Tick() {
   }
   if (have < m.need) { $('ft8st').textContent = `slot ${hms(slot)}: only ${(have / 12000).toFixed(1)} s of audio, not decoded`; return; }
   if (!F.worker) {
-    F.worker = new Worker('ft8worker.js?v=87f93b0');
+    F.worker = new Worker('ft8worker.js?v=1cc9c47');
     F.worker.onmessage = e => ft8Result(e.data);
     F.worker.onerror = e => { F.busy = false; log('FT8 worker: ' + e.message); };
   }
@@ -1811,7 +1811,7 @@ function wsprTick() {
       if (have < 100 * 12000) $('wsprst').textContent = `period ${hm(period)}: only ${(have / 12000).toFixed(0)} s of audio, not decoded`;
       else {
         if (!WS.worker) {
-          WS.worker = new Worker('wsprworker.js?v=87f93b0');
+          WS.worker = new Worker('wsprworker.js?v=1cc9c47');
           WS.worker.onmessage = e => wsprResult(e.data);
           WS.worker.onerror = e => { WS.busy = false; log('WSPR worker: ' + e.message); };
         }
@@ -2298,7 +2298,7 @@ const step = () => Number($('step').value);
 // switches CW to a CW filter and back to 2.8 kHz when leaving CW
 const filterKey = m => m === 'cw' ? 'filter-cw' : m === 'am' ? 'filter-am' : 'filter-ssb';
 const filterDefault = m => m === 'cw' ? 3 : m === 'am' ? 5 : 0;
-function filterOptions() { $('filter').querySelector('[value="5"]').hidden = S.mode !== 'am'; }   // 6 kHz: AM only
+function filterOptions() { $('filter').querySelector('[value="5"]').hidden = S.mode !== 'am'; }   // 10 kHz: AM only
 function setMode(m) {
   S.mode = m; cmd(`mode ${m}`); store.set('mode', m);
   filterOptions();
