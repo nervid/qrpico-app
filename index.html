@@ -116,6 +116,16 @@ label.inline { display: flex; gap: 6px; align-items: center; color: var(--muted)
 .ft8row.me > span:last-child { color: var(--warn); font-weight: 700; }
 .ft8row.mine > span:last-child { color: var(--muted); font-style: italic; }
 #ft8txmsg.tx { color: var(--warn); font-weight: 600; }
+.vnaplots { position: relative; display: flex; flex-direction: column; gap: 1px; border-radius: 8px; overflow: hidden; border: 1px solid var(--line); background: var(--spec-grid); flex: none; }
+#vnaro { background: rgba(13,17,23,0.75); padding: 2px 6px; border-radius: 4px; }
+.vnaplots canvas { display: block; width: 100%; height: var(--vna-h, 230px); background: var(--spec-bg); cursor: crosshair; touch-action: pan-y; }
+.vnafield { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px 8px; font-size: 13px; }
+.vnafield label { display: flex; flex-direction: column; gap: 2px; color: var(--muted); font-size: 12px; }
+.vnafield input, .vnafield select { width: 100%; min-width: 0; font: 13px var(--mono); }
+.vnacal { border: 1px solid var(--accent); border-radius: 8px; padding: 8px 10px; }
+.vnacal ol { margin: 4px 0; padding-left: 1.4em; font-size: 13px; }
+.vnacal li.done { color: var(--ok); } .vnacal li.cur { font-weight: 600; }
+@media (max-width: 520px) { .vnaplots { --vna-h: 190px; } .vnafield { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .freqwarn { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 4px 0 0; color: var(--warn); font-size: 12px; }
 .freqwarn[hidden] { display: none; }
 .freqwarn.tx { font-weight: 700; }
@@ -226,6 +236,7 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
       <button role="tab" data-tab="ft8" aria-selected="false">FT8 / FT4</button>
       <button role="tab" data-tab="wspr" aria-selected="false">WSPR</button>
       <button role="tab" data-tab="cw" aria-selected="false">CW</button>
+      <button role="tab" data-tab="vna" aria-selected="false">VNA</button>
     </div>
     <div id="v-spec" class="tabview">
     <div class="canvases">
@@ -264,6 +275,29 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
         <span>speed</span><select id="cwwpm" aria-label="CW speed"><option>12</option><option>15</option><option>18</option><option selected>20</option><option>22</option><option>25</option><option>28</option><option>30</option></select>
       </div>
       <p class="note" id="cwst">Sends Morse on the shown frequency (CW mode: you hear stations at 600 Hz when they are on it). The board keys itself and stops 0.6 s after the text; text typed while it sends is appended. Your call: FT8 tab / station data.</p>
+    </div>
+    <div id="v-vna" class="tabview" hidden>
+      <div class="vnaplots">
+        <canvas id="vnaswr" aria-label="SWR over frequency"></canvas>
+        <canvas id="vnazx" aria-label="Resistance and reactance over frequency"></canvas>
+        <div id="vnaro" class="readout" aria-live="polite"></div>
+      </div>
+      <p class="note" style="margin:0" id="vnamin">Measures the load on J701 (antenna or DUT) with the receiver's injection. Tap / click a curve for the values.</p>
+      <div class="row" id="vnaquick"><button data-r="7.0,7.2,5">40 m</button><button data-r="14.0,14.35,10">20 m</button><button data-r="28.0,29.7,50">10 m</button><button data-r="1,30,250" title="Outside the amateur bands: only with a dummy load or a DUT on J701">1 – 30 MHz</button></div>
+      <div class="vnafield">
+        <label>start MHz<input id="vnaf1" type="number" min="1" max="30" step="0.001" value="7.0"></label>
+        <label>stop MHz<input id="vnaf2" type="number" min="1" max="30" step="0.001" value="7.2"></label>
+        <label>step kHz<input id="vnastep" type="number" min="1" max="5000" step="1" value="5"></label>
+        <label>averaging<select id="vnafolds"><option value="2">fast</option><option value="4" selected>normal</option><option value="8">slow</option><option value="16">slowest</option></select></label>
+      </div>
+      <label class="inline"><input id="vnaoob" type="checkbox"> allow sweeps outside the amateur bands (dummy load / DUT only)</label>
+      <div class="row"><button id="vnago" class="primary">Sweep</button><button id="vnastop">Stop</button><button id="vnacsv" title="Download the points as CSV">CSV</button><button id="vnacalb" title="Load / open / short on J701, about 4 minutes each">Calibrate</button></div>
+      <p class="note" id="vnast">not connected</p>
+      <div class="vnacal" id="vnacal" hidden>
+        <ol><li data-s="load">Connect the 50 Ω load to J701</li><li data-s="open">Remove it: J701 open</li><li data-s="short">Connect the short to J701</li></ol>
+        <div class="row"><button id="vnacalgo" class="primary">Start</button><button id="vnacalx">Cancel</button></div>
+        <p class="note" id="vnacalst">The calibration sweeps every band network from 1 to 30 MHz: it leaves the amateur bands, so nothing but the standard may be on J701. About 4 minutes per step.</p>
+      </div>
     </div>
     <div id="v-wspr" class="tabview" hidden>
       <div class="ft8wfbox">
@@ -355,10 +389,10 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
   <button id="mmute">Mute</button>
   <button id="mptt" class="ptt" aria-pressed="false">PTT</button>
 </div>
-<script src="ft8.js?v=1cc9c47"></script>
-<script src="ft4.js?v=1cc9c47"></script>
-<script src="wspr.js?v=1cc9c47"></script>
-<script src="cw.js?v=1cc9c47"></script>
+<script src="ft8.js?v=be797d0"></script>
+<script src="ft4.js?v=be797d0"></script>
+<script src="wspr.js?v=be797d0"></script>
+<script src="cw.js?v=be797d0"></script>
 <script>
 'use strict';
 // ---------------------------------------------------------------- protocol (docs/usb-protocol.md)
@@ -720,7 +754,9 @@ async function cmd(line, quiet = false) { if (!link) { if (!quiet) log('not conn
 
 function onFrame(type, flags, p) {
   if (type === T_TEXT) {
-    const t = dec.decode(p); log(t);
+    const t = dec.decode(p);
+    if (/^VNA[RS] /.test(t)) { vnaText(t); return; }    // VNA tab polling, not for the log
+    log(t);
     if (/^ptt on: /.test(t) && !/^ptt on: ok/.test(t) && TXA.ptt) setPtt(false, true);   // refused by the board
     const st = t.match(/^station: call (\S+) grid (\S+) power ([\d.]+) ft8hz (\d+)(?: xtal ([+-]?[\d.]+))?(?: at ([-\d.]+) C)?/m);
     if (st) stationApply(st[1], st[2], Number(st[3]), Number(st[4]), st[5], st[6]);
@@ -1226,7 +1262,7 @@ function ft8Tick() {
   }
   if (have < m.need) { $('ft8st').textContent = `slot ${hms(slot)}: only ${(have / 12000).toFixed(1)} s of audio, not decoded`; return; }
   if (!F.worker) {
-    F.worker = new Worker('ft8worker.js?v=1cc9c47');
+    F.worker = new Worker('ft8worker.js?v=be797d0');
     F.worker.onmessage = e => ft8Result(e.data);
     F.worker.onerror = e => { F.busy = false; log('FT8 worker: ' + e.message); };
   }
@@ -1693,11 +1729,246 @@ function setTab(tab) {
   V.tab = tab; store.set('tab', tab);
   document.querySelectorAll('[data-tab]').forEach(b => b.setAttribute('aria-selected', String(b.dataset.tab === tab)));
   $('v-spec').hidden = tab !== 'spec'; $('v-ft8').hidden = tab !== 'ft8'; $('v-wspr').hidden = tab !== 'wspr'; $('v-cw').hidden = tab !== 'cw';
+  $('v-vna').hidden = tab !== 'vna';
   cwLayout();
   audioStream();
-  if (tab === 'spec') { S.fLoWf = null; drawSpectrum(); drawWfOverlay(); } else if (tab === 'ft8') ft8WfOverlay(); else if (tab === 'wspr') wsprWfOverlay(); else { CWS.lastF = null; cwScopeOverlay(); }
+  if (tab === 'spec') { S.fLoWf = null; drawSpectrum(); drawWfOverlay(); } else if (tab === 'ft8') ft8WfOverlay(); else if (tab === 'wspr') wsprWfOverlay(); else if (tab === 'vna') { vnaDraw(); vnaPoll(true); } else { CWS.lastF = null; cwScopeOverlay(); }
 }
 document.querySelectorAll('[data-tab]').forEach(b => b.addEventListener('click', () => setTab(b.dataset.tab)));
+
+// ---- VNA tab: the board measures the load on J701 with its receiver's injection (firmware 'vna sweep / read /
+// status / cal / arm', docs/usb-protocol.md). Points come in through polled 'vna read' answers (VNAR ...).
+const VN = { pts: [], running: false, done: 0, total: 0, armed: false, cal: null, job: 'idle', jk: 0, jn: 0,
+  calStep: -1, calSeen: false, sel: -1, timer: 0, msPt: 240, view: null };
+const VNA_TX = [[7e6, 7.2e6], [14e6, 14.35e6], [28e6, 29.7e6]];   // the board's bands: in-band needs no 'vna arm'
+const VNA_STD = ['load', 'open', 'short'];
+const vnaInBand = f => VNA_TX.some(([a, b]) => f >= a && f <= b);
+const vnaSwr = r => r < 0.99 ? (1 + r) / (1 - r) : 99;
+function vnaPoint(p) {
+  const r = Math.hypot(p.gre, p.gim), d = (1 - p.gre) ** 2 + p.gim ** 2;
+  return { ...p, r, swr: vnaSwr(r), R: 50 * (1 - p.gre ** 2 - p.gim ** 2) / d, X: 50 * 2 * p.gim / d, ok: !(p.flags & 1) };
+}
+// sorted, readings on the same LO merged
+function vnaSeries() {
+  const m = new Map();
+  for (const p of VN.pts) {
+    if (p.flags & 2) continue;
+    const q = m.get(p.f);
+    if (!q) m.set(p.f, { ...p, n: 1 });
+    else { q.gre = (q.gre * q.n + p.gre) / (q.n + 1); q.gim = (q.gim * q.n + p.gim) / (q.n + 1); q.err = Math.max(q.err, p.err); q.flags |= p.flags; q.n++; }
+  }
+  return [...m.values()].sort((a, b) => a.f - b.f).map(vnaPoint);
+}
+// monotone cubic interpolation (Fritsch-Carlson): no overshoot between the points
+function vnaMono(xs, ys) {
+  const n = xs.length, d = [], m = new Array(n).fill(0);
+  for (let i = 0; i < n - 1; i++) d.push((ys[i + 1] - ys[i]) / (xs[i + 1] - xs[i]));
+  if (n > 1) { m[0] = d[0]; m[n - 1] = d[n - 2]; }
+  for (let i = 1; i < n - 1; i++) if (d[i - 1] * d[i] > 0) { const w1 = 2 * (xs[i + 1] - xs[i]) + (xs[i] - xs[i - 1]), w2 = (xs[i + 1] - xs[i]) + 2 * (xs[i] - xs[i - 1]); m[i] = (w1 + w2) / (w1 / d[i - 1] + w2 / d[i]); }
+  return x => {
+    let i = 0; while (i < n - 2 && x > xs[i + 1]) i++;
+    const h = xs[i + 1] - xs[i], t = (x - xs[i]) / h, t2 = t * t, t3 = t2 * t;
+    return (2 * t3 - 3 * t2 + 1) * ys[i] + (t3 - 2 * t2 + t) * h * m[i] + (-2 * t3 + 3 * t2) * ys[i + 1] + (t3 - t2) * h * m[i + 1];
+  };
+}
+function vnaTicks(a, b, n) {
+  const raw = (b - a) / n, p = 10 ** Math.floor(Math.log10(raw)), s = [1, 2, 5, 10].map(k => k * p).find(k => k >= raw);
+  const t = []; for (let v = Math.ceil(a / s) * s; v <= b + 1e-9; v += s) t.push(v); return t;
+}
+function vnaRangeX(ser) {
+  const f1 = Number($('vnaf1').value) * 1e6, f2 = Number($('vnaf2').value) * 1e6;
+  const a = Math.min(f1, ser.length ? ser[0].f : f1), b = Math.max(f2, ser.length ? ser[ser.length - 1].f : f2);
+  return b > a ? [a, b] : [a - 1e3, a + 1e3];
+}
+function vnaPlot(cv, ser, [fa, fb], kind) {
+  fit(cv);
+  const g = cv.getContext('2d'), dpr = window.devicePixelRatio || 1, W = cv.width, H = cv.height;
+  const L = 44 * dpr, Rm = 8 * dpr, T = 8 * dpr, B = 20 * dpr, pw = W - L - Rm, ph = H - T - B;
+  g.clearRect(0, 0, W, H); g.font = `${11 * dpr}px ui-monospace, monospace`; g.lineWidth = dpr;
+  const X = f => L + (f - fa) / (fb - fa) * pw;
+  for (const [a, b] of BANDS) if (b > fa && a < fb) { g.fillStyle = 'rgba(124,196,255,0.08)'; g.fillRect(X(Math.max(a, fa)), T, X(Math.min(b, fb)) - X(Math.max(a, fa)), ph); }
+  let Y, yt, lab, series;
+  const good = ser.filter(p => p.ok);
+  if (kind === 'swr') {
+    const mx = Math.max(2, ...good.map(p => p.swr)), top = [2, 3, 5, 10, 30, 100].find(k => k >= mx * 1.05) || 100;
+    Y = s => T + ph - Math.log(Math.min(Math.max(s, 1), top)) / Math.log(top) * ph;
+    yt = [1, 1.5, 2, 3, 5, 10, 20, 50, 100].filter(v => v <= top); lab = v => String(v);
+    series = [{ key: 'swr', col: css('--spec-line') }];
+  } else {
+    const vals = good.flatMap(p => [p.R, p.X]).filter(Number.isFinite);
+    let lo = Math.min(0, ...vals), hi = Math.max(60, ...vals); const pad = (hi - lo) * 0.08; lo -= pad; hi += pad;
+    Y = v => T + ph - (Math.min(Math.max(v, lo), hi) - lo) / (hi - lo) * ph;
+    yt = vnaTicks(lo, hi, 5); lab = v => String(Math.round(v));
+    series = [{ key: 'R', col: css('--ok') }, { key: 'X', col: css('--warn') }];
+  }
+  g.strokeStyle = css('--spec-grid'); g.fillStyle = '#9aa4b2'; g.textAlign = 'right'; g.textBaseline = 'middle';
+  for (const v of yt) { const y = Y(v); g.beginPath(); g.moveTo(L, y); g.lineTo(L + pw, y); g.stroke(); g.fillText(lab(v), L - 4 * dpr, y); }
+  g.textAlign = 'center'; g.textBaseline = 'top';
+  for (const v of vnaTicks(fa / 1e6, fb / 1e6, Math.max(2, Math.floor(pw / (70 * dpr))))) {
+    const x = X(v * 1e6); g.beginPath(); g.moveTo(x, T); g.lineTo(x, T + ph); g.stroke(); g.fillText(+v.toFixed(4) + '', x, T + ph + 4 * dpr);
+  }
+  g.textAlign = 'left'; g.fillText(kind === 'swr' ? 'SWR' : 'R / X Ω', L + 4 * dpr, T + 2 * dpr);
+  if (kind !== 'swr') { g.fillStyle = css('--ok'); g.fillText('R', L + 70 * dpr, T + 2 * dpr); g.fillStyle = css('--warn'); g.fillText('X', L + 84 * dpr, T + 2 * dpr); }
+  for (const s of series) {
+    if (good.length > 1) {
+      const xs = good.map(p => p.f), f = vnaMono(xs, good.map(p => p[s.key]));
+      g.strokeStyle = s.col; g.lineWidth = 1.5 * dpr; g.beginPath();
+      for (let px = Math.max(L, X(xs[0])); px <= Math.min(L + pw, X(xs[xs.length - 1])); px += dpr) {
+        const y = Y(f(fa + (px - L) / pw * (fb - fa))); px === Math.max(L, X(xs[0])) ? g.moveTo(px, y) : g.lineTo(px, y);
+      }
+      g.stroke(); g.lineWidth = dpr;
+    }
+    for (const p of ser) {
+      const x = X(p.f), y = Y(p[s.key]); g.beginPath(); g.arc(x, y, 2.5 * dpr, 0, 2 * Math.PI);
+      if (p.ok) { g.fillStyle = s.col; g.fill(); } else { g.strokeStyle = '#7d8794'; g.stroke(); }
+    }
+  }
+  if (VN.sel >= 0 && ser[VN.sel]) { const x = X(ser[VN.sel].f); g.strokeStyle = css('--tune'); g.beginPath(); g.moveTo(x, T); g.lineTo(x, T + ph); g.stroke(); }
+  return { X, L, pw, fa, fb };
+}
+function vnaDraw() {
+  if ($('v-vna').hidden) return;
+  const ser = vnaSeries(), rng = vnaRangeX(ser);
+  VN.view = { ser, ...vnaPlot($('vnaswr'), ser, rng, 'swr') };
+  vnaPlot($('vnazx'), ser, rng, 'zx');
+  const p = ser[VN.sel];
+  $('vnaro').innerHTML = p ? `${(p.f / 1e6).toFixed(4)} MHz${p.ok ? '' : ' (unreliable)'}<br>SWR ${p.swr.toFixed(2)}<br>Z ${p.R.toFixed(1)} ${p.X < 0 ? '−' : '+'} j${Math.abs(p.X).toFixed(1)} Ω<br>|Γ| ${p.r.toFixed(3)} ∠ ${(Math.atan2(p.gim, p.gre) * 180 / Math.PI).toFixed(1)}°<br>±${p.err.toFixed(3)}, ${({ 1: '10 m', 2: '20 m', 3: '40 m' })[p.band]} network` : '';
+  const good = ser.filter(q => q.ok);
+  if (good.length) {
+    const b = good.reduce((a, q) => q.swr < a.swr ? q : a);
+    $('vnamin').textContent = `Minimum SWR ${b.swr.toFixed(2)} at ${(b.f / 1e6).toFixed(4)} MHz (Z ${b.R.toFixed(1)} ${b.X < 0 ? '−' : '+'} j${Math.abs(b.X).toFixed(1)} Ω). ${ser.length - good.length ? (ser.length - good.length) + ' unreliable point(s) hollow. ' : ''}${VN.pts.length > ser.length ? `${VN.pts.length} readings on ${ser.length} frequencies (the LO has discrete settings, readings on the same LO are averaged). ` : ''}Tap / click a curve for the values.`;
+  }
+}
+function vnaPick(ev) {
+  const v = VN.view; if (!v || !v.ser.length) return;
+  const dpr = window.devicePixelRatio || 1, x = (ev.clientX - ev.currentTarget.getBoundingClientRect().left) * dpr;
+  const f = v.fa + (x - v.L) / v.pw * (v.fb - v.fa);
+  VN.sel = v.ser.reduce((bi, p, i) => Math.abs(p.f - f) < Math.abs(v.ser[bi].f - f) ? i : bi, 0); vnaDraw();
+}
+function vnaKey(ev) {
+  const n = VN.view ? VN.view.ser.length : 0; if (!n || !['ArrowLeft', 'ArrowRight'].includes(ev.key)) return;
+  ev.preventDefault(); VN.sel = Math.min(n - 1, Math.max(0, (VN.sel < 0 ? 0 : VN.sel) + (ev.key === 'ArrowRight' ? 1 : -1))); vnaDraw();
+}
+function vnaStatusText() {
+  if (!link) { $('vnast').textContent = 'not connected'; return; }
+  const cal = VN.cal ? VNA_STD.map(s => `${s} ${VN.cal[s] === 'ok' ? '✓' : '–'}`).join(', ') : '?';
+  let t = `calibration: ${cal}${VN.cal && VNA_STD.every(s => VN.cal[s] === 'ok') ? '' : ' (incomplete: Calibrate)'}`;
+  if (VN.running) t += ` · sweeping ${VN.done}/${VN.total}, about ${Math.ceil((VN.total - VN.done) * VN.msPt / 1000)} s left`;
+  else if (VN.job !== 'idle' && VN.job !== 'sweep') t += ` · ${VN.job} ${VN.jk}/${VN.jn}`;
+  if (VN.armed) t += ' · out-of-band armed';
+  $('vnast').textContent = t;
+  $('vnago').disabled = VN.running || VN.job !== 'idle'; $('vnastop').disabled = !VN.running && VN.job === 'idle';
+}
+function vnaText(t) {
+  const lines = t.split('\n');
+  const h = lines[0].split(' ');
+  if (h[0] === 'VNAS') {
+    // VNAS cal load ok open ok short ok armed 0 job idle 0 0
+    VN.cal = { load: h[3], open: h[5], short: h[7] }; VN.armed = h[9] === '1'; VN.job = h[11]; VN.jk = +h[12]; VN.jn = +h[13];
+    if (VN.calStep >= 0) vnaCalUpdate();
+  } else {
+    // VNAR <running> <done> <total> <dropped>, then P <f> <band> <G re> <G im> <err> <flags>
+    const running = h[1] === '1'; VN.done = +h[2]; VN.total = +h[3];
+    let n = 0;
+    for (const l of lines.slice(1)) {
+      const p = l.split(' '); if (p[0] !== 'P') continue;
+      VN.pts.push({ f: +p[1], band: +p[2], gre: +p[3], gim: +p[4], err: +p[5], flags: +p[6] }); n++;
+    }
+    if (+h[4]) log(`VNA: ${h[4]} points dropped on the board (read too slowly)`);
+    if (!running && !n && VN.running) { VN.running = false; log(`VNA sweep done: ${VN.pts.length} points`); }
+    if (n) vnaDraw();
+  }
+  vnaStatusText();
+}
+function vnaPoll(now) {
+  clearTimeout(VN.timer);
+  const busy = VN.running || VN.calStep >= 0 && VN.calSeen !== 'done';
+  if (link && (busy || !$('v-vna').hidden)) {
+    if (VN.running) cmd('vna read', true);
+    else if (now || busy || !VN.cal) cmd('vna status', true);
+  }
+  vnaStatusText();
+  VN.timer = setTimeout(() => vnaPoll(false), busy ? 300 : 3000);
+}
+const VNA_WARN = 'The measurement injects a small signal (up to about -25 dBm) on the measured frequencies: outside the amateur bands this is an unlicensed emission.\n\nOnly continue with a dummy load or a device under test on J701, never an antenna.';
+async function vnaArm() {
+  if (VN.armed) return true;
+  if (!confirm(VNA_WARN)) return false;
+  await cmd('vna arm'); VN.armed = true; return true;
+}
+async function vnaSweep() {
+  if (!link) { log('not connected'); return; }
+  const f1 = Math.round(Number($('vnaf1').value) * 1e6), f2 = Math.round(Number($('vnaf2').value) * 1e6), step = Math.round(Number($('vnastep').value) * 1e3);
+  if (!(f1 >= 1e6 && f2 <= 30e6 && f2 >= f1 && step >= 1000)) { $('vnast').textContent = 'range 1 – 30 MHz, stop ≥ start, step ≥ 1 kHz'; return; }
+  const n = Math.floor((f2 - f1) / step) + 1;
+  if (n > 4001) { $('vnast').textContent = `${n} points: at most 4001 (larger step)`; return; }
+  let leaves = false; for (let f = f1; f <= f2; f += step) if (!vnaInBand(f)) { leaves = true; break; }
+  if (leaves) {
+    if (!$('vnaoob').checked) { $('vnast').textContent = 'The range leaves the amateur bands: tick "allow sweeps outside the amateur bands" (dummy load / DUT only).'; return; }
+    if (!await vnaArm()) return;
+  }
+  const folds = Number($('vnafolds').value);
+  VN.pts = []; VN.sel = -1; VN.running = true; VN.done = 0; VN.total = n; VN.msPt = 75 + folds * 45;
+  await cmd(`vna sweep ${f1} ${f2} ${step} ${folds}`);
+  vnaDraw(); vnaPoll(false);
+}
+function vnaCsv() {
+  const ser = vnaSeries(); if (!ser.length) return;
+  const rows = ['f_hz,network,gamma_re,gamma_im,swr,r_ohm,x_ohm,expected_dgamma,reliable',
+    ...ser.map(p => [p.f, ({ 1: '10m', 2: '20m', 3: '40m' })[p.band], p.gre, p.gim, p.swr.toFixed(3), p.R.toFixed(2), p.X.toFixed(2), p.err, p.ok ? 1 : 0].join(','))];
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([rows.join('\n') + '\n'], { type: 'text/csv' }));
+  a.download = `qrpico-vna-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '')}.csv`; a.click(); URL.revokeObjectURL(a.href);
+}
+// calibration wizard: load, open, short; each step a firmware sweep of about 4 minutes, followed by 'vna status'
+function vnaCalUpdate() {
+  const li = [...$('vnacal').querySelectorAll('li')];
+  if (VN.calSeen === true && VN.job === 'idle') {      // the step's sweep ended
+    VN.calSeen = false;
+    if (VN.cal[VNA_STD[VN.calStep]] === 'ok') VN.calStep++;
+    else $('vnacalst').textContent = 'That step did not complete: start it again.';
+  }
+  if (VN.job === VNA_STD[VN.calStep]) VN.calSeen = true;
+  li.forEach((e, i) => { e.className = i < VN.calStep ? 'done' : i === VN.calStep ? 'cur' : ''; });
+  if (VN.calStep >= 3) {
+    $('vnacalst').textContent = 'Calibration stored on the board.'; $('vnacalgo').hidden = true; $('vnacalx').textContent = 'Close';
+    VN.calSeen = 'done'; return;
+  }
+  const busy = VN.job !== 'idle';
+  $('vnacalgo').disabled = busy;
+  if (busy) $('vnacalst').textContent = `Measuring ${VN.job}: ${VN.jk}/${VN.jn}, about ${Math.ceil((VN.jn - VN.jk) * 0.24 / 60)} min left. Do not touch J701.`;
+  else if (VN.calSeen !== 'done') $('vnacalst').textContent = `Step ${VN.calStep + 1} of 3: ${li[VN.calStep].textContent}, then Start.`;
+}
+async function vnaCalStart() {
+  if (!link) return;
+  if (!await vnaArm()) return;
+  VN.calSeen = false;
+  await cmd(`vna cal ${VNA_STD[VN.calStep]}`);
+  VN.job = VNA_STD[VN.calStep]; VN.calSeen = true; vnaCalUpdate(); vnaPoll(false);
+}
+$('vnago').addEventListener('click', vnaSweep);
+$('vnastop').addEventListener('click', () => { cmd('vna abort'); if (VN.calStep >= 0) VN.calSeen = false; vnaPoll(true); });
+$('vnacsv').addEventListener('click', vnaCsv);
+$('vnacalb').addEventListener('click', () => {
+  VN.calStep = 0; VN.calSeen = false; $('vnacal').hidden = false; $('vnacalgo').hidden = false; $('vnacalx').textContent = 'Cancel';
+  vnaCalUpdate(); vnaPoll(true);
+});
+$('vnacalgo').addEventListener('click', vnaCalStart);
+$('vnacalx').addEventListener('click', () => {
+  if (VN.job === VNA_STD[VN.calStep]) cmd('vna abort');
+  VN.calStep = -1; VN.calSeen = false; $('vnacal').hidden = true; vnaPoll(true);
+});
+$('vnaquick').addEventListener('click', e => {
+  const r = e.target.dataset && e.target.dataset.r; if (!r) return;
+  const [a, b, s] = r.split(','); $('vnaf1').value = a; $('vnaf2').value = b; $('vnastep').value = s; vnaDraw();
+});
+for (const id of ['vnaswr', 'vnazx']) {
+  const c = $(id); c.tabIndex = 0;
+  c.addEventListener('pointerdown', vnaPick); c.addEventListener('pointermove', e => { if (e.buttons) vnaPick(e); });
+  c.addEventListener('keydown', vnaKey);
+}
+['vnaf1', 'vnaf2'].forEach(id => $(id).addEventListener('change', vnaDraw));
+window.addEventListener('resize', vnaDraw);
 
 // ---- FT8 audio waterfall: 0 ... 3200 Hz of the 12 kS/s stream, 4096-point FFT (2.93 Hz) every 2048
 // samples (~6 rows per second), newest row on top, a line at every slot start
@@ -1811,7 +2082,7 @@ function wsprTick() {
       if (have < 100 * 12000) $('wsprst').textContent = `period ${hm(period)}: only ${(have / 12000).toFixed(0)} s of audio, not decoded`;
       else {
         if (!WS.worker) {
-          WS.worker = new Worker('wsprworker.js?v=1cc9c47');
+          WS.worker = new Worker('wsprworker.js?v=be797d0');
           WS.worker.onmessage = e => wsprResult(e.data);
           WS.worker.onerror = e => { WS.busy = false; log('WSPR worker: ' + e.message); };
         }
