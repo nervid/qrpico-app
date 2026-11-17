@@ -389,10 +389,10 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
   <button id="mmute">Mute</button>
   <button id="mptt" class="ptt" aria-pressed="false">PTT</button>
 </div>
-<script src="ft8.js?v=bf0f732"></script>
-<script src="ft4.js?v=bf0f732"></script>
-<script src="wspr.js?v=bf0f732"></script>
-<script src="cw.js?v=bf0f732"></script>
+<script src="ft8.js?v=d5ef2d3"></script>
+<script src="ft4.js?v=d5ef2d3"></script>
+<script src="wspr.js?v=d5ef2d3"></script>
+<script src="cw.js?v=d5ef2d3"></script>
 <script>
 'use strict';
 // ---------------------------------------------------------------- protocol (docs/usb-protocol.md)
@@ -1262,7 +1262,7 @@ function ft8Tick() {
   }
   if (have < m.need) { $('ft8st').textContent = `slot ${hms(slot)}: only ${(have / 12000).toFixed(1)} s of audio, not decoded`; return; }
   if (!F.worker) {
-    F.worker = new Worker('ft8worker.js?v=bf0f732');
+    F.worker = new Worker('ft8worker.js?v=d5ef2d3');
     F.worker.onmessage = e => ft8Result(e.data);
     F.worker.onerror = e => { F.busy = false; log('FT8 worker: ' + e.message); };
   }
@@ -1890,7 +1890,7 @@ function vnaPoll(now) {
   vnaStatusText();
   VN.timer = setTimeout(() => vnaPoll(false), busy ? 300 : 3000);
 }
-const VNA_WARN = 'Sweeping outside the amateur bands: the board injects a weak test signal (about -25 dBm, less than the -10 dBm of a typical NanoVNA) on the swept frequencies. With an antenna on J701 it is radiated at that level.\n\nContinue?';
+const VNA_WARN = 'Sweeping outside the amateur bands: the board injects a weak test signal (about -25 dBm) on the swept frequencies. With an antenna on J701 it is radiated at that level.\n\nContinue?';
 async function vnaArm() {
   if (VN.armed) return true;
   if (!confirm(VNA_WARN)) return false;
@@ -2082,7 +2082,7 @@ function wsprTick() {
       if (have < 100 * 12000) $('wsprst').textContent = `period ${hm(period)}: only ${(have / 12000).toFixed(0)} s of audio, not decoded`;
       else {
         if (!WS.worker) {
-          WS.worker = new Worker('wsprworker.js?v=bf0f732');
+          WS.worker = new Worker('wsprworker.js?v=d5ef2d3');
           WS.worker.onmessage = e => wsprResult(e.data);
           WS.worker.onerror = e => { WS.busy = false; log('WSPR worker: ' + e.message); };
         }
