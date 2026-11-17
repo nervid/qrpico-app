@@ -283,14 +283,14 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
         <div id="vnaro" class="readout" aria-live="polite"></div>
       </div>
       <p class="note" style="margin:0" id="vnamin">Measures the load on J701 (antenna or DUT) with the receiver's injection. Tap / click a curve for the values.</p>
-      <div class="row" id="vnaquick"><button data-r="7.0,7.2,5">40 m</button><button data-r="14.0,14.35,10">20 m</button><button data-r="28.0,29.7,50">10 m</button><button data-r="1,30,250" title="Outside the amateur bands: only with a dummy load or a DUT on J701">1 – 30 MHz</button></div>
+      <div class="row" id="vnaquick"><button data-r="7.0,7.2,5">40 m</button><button data-r="14.0,14.35,10">20 m</button><button data-r="28.0,29.7,50">10 m</button><button data-r="1,30,250" title="Leaves the amateur bands: needs the tick below">1 – 30 MHz</button></div>
       <div class="vnafield">
         <label>start MHz<input id="vnaf1" type="number" min="1" max="30" step="0.001" value="7.0"></label>
         <label>stop MHz<input id="vnaf2" type="number" min="1" max="30" step="0.001" value="7.2"></label>
         <label>step kHz<input id="vnastep" type="number" min="1" max="5000" step="1" value="5"></label>
         <label>averaging<select id="vnafolds"><option value="2">fast</option><option value="4" selected>normal</option><option value="8">slow</option><option value="16">slowest</option></select></label>
       </div>
-      <label class="inline"><input id="vnaoob" type="checkbox"> allow sweeps outside the amateur bands (dummy load / DUT only)</label>
+      <label class="inline"><input id="vnaoob" type="checkbox"> allow sweeps outside the amateur bands</label>
       <div class="row"><button id="vnago" class="primary">Sweep</button><button id="vnastop">Stop</button><button id="vnacsv" title="Download the points as CSV">CSV</button><button id="vnacalb" title="Load / open / short on J701, about 4 minutes each">Calibrate</button></div>
       <p class="note" id="vnast">not connected</p>
       <div class="vnacal" id="vnacal" hidden>
@@ -389,10 +389,10 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
   <button id="mmute">Mute</button>
   <button id="mptt" class="ptt" aria-pressed="false">PTT</button>
 </div>
-<script src="ft8.js?v=be797d0"></script>
-<script src="ft4.js?v=be797d0"></script>
-<script src="wspr.js?v=be797d0"></script>
-<script src="cw.js?v=be797d0"></script>
+<script src="ft8.js?v=bf0f732"></script>
+<script src="ft4.js?v=bf0f732"></script>
+<script src="wspr.js?v=bf0f732"></script>
+<script src="cw.js?v=bf0f732"></script>
 <script>
 'use strict';
 // ---------------------------------------------------------------- protocol (docs/usb-protocol.md)
@@ -1262,7 +1262,7 @@ function ft8Tick() {
   }
   if (have < m.need) { $('ft8st').textContent = `slot ${hms(slot)}: only ${(have / 12000).toFixed(1)} s of audio, not decoded`; return; }
   if (!F.worker) {
-    F.worker = new Worker('ft8worker.js?v=be797d0');
+    F.worker = new Worker('ft8worker.js?v=bf0f732');
     F.worker.onmessage = e => ft8Result(e.data);
     F.worker.onerror = e => { F.busy = false; log('FT8 worker: ' + e.message); };
   }
@@ -1890,7 +1890,7 @@ function vnaPoll(now) {
   vnaStatusText();
   VN.timer = setTimeout(() => vnaPoll(false), busy ? 300 : 3000);
 }
-const VNA_WARN = 'The measurement injects a small signal (up to about -25 dBm) on the measured frequencies: outside the amateur bands this is an unlicensed emission.\n\nOnly continue with a dummy load or a device under test on J701, never an antenna.';
+const VNA_WARN = 'Sweeping outside the amateur bands: the board injects a weak test signal (about -25 dBm, less than the -10 dBm of a typical NanoVNA) on the swept frequencies. With an antenna on J701 it is radiated at that level.\n\nContinue?';
 async function vnaArm() {
   if (VN.armed) return true;
   if (!confirm(VNA_WARN)) return false;
@@ -1904,7 +1904,7 @@ async function vnaSweep() {
   if (n > 4001) { $('vnast').textContent = `${n} points: at most 4001 (larger step)`; return; }
   let leaves = false; for (let f = f1; f <= f2; f += step) if (!vnaInBand(f)) { leaves = true; break; }
   if (leaves) {
-    if (!$('vnaoob').checked) { $('vnast').textContent = 'The range leaves the amateur bands: tick "allow sweeps outside the amateur bands" (dummy load / DUT only).'; return; }
+    if (!$('vnaoob').checked) { $('vnast').textContent = 'The range leaves the amateur bands: tick "allow sweeps outside the amateur bands".'; return; }
     if (!await vnaArm()) return;
   }
   const folds = Number($('vnafolds').value);
@@ -2082,7 +2082,7 @@ function wsprTick() {
       if (have < 100 * 12000) $('wsprst').textContent = `period ${hm(period)}: only ${(have / 12000).toFixed(0)} s of audio, not decoded`;
       else {
         if (!WS.worker) {
-          WS.worker = new Worker('wsprworker.js?v=be797d0');
+          WS.worker = new Worker('wsprworker.js?v=bf0f732');
           WS.worker.onmessage = e => wsprResult(e.data);
           WS.worker.onerror = e => { WS.busy = false; log('WSPR worker: ' + e.message); };
         }
