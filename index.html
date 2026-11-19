@@ -389,10 +389,10 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
   <button id="mmute">Mute</button>
   <button id="mptt" class="ptt" aria-pressed="false">PTT</button>
 </div>
-<script src="ft8.js?v=d5ef2d3"></script>
-<script src="ft4.js?v=d5ef2d3"></script>
-<script src="wspr.js?v=d5ef2d3"></script>
-<script src="cw.js?v=d5ef2d3"></script>
+<script src="ft8.js?v=c89eeda"></script>
+<script src="ft4.js?v=c89eeda"></script>
+<script src="wspr.js?v=c89eeda"></script>
+<script src="cw.js?v=c89eeda"></script>
 <script>
 'use strict';
 // ---------------------------------------------------------------- protocol (docs/usb-protocol.md)
@@ -757,6 +757,7 @@ function onFrame(type, flags, p) {
     const t = dec.decode(p);
     if (/^VNA[RS] /.test(t)) { vnaText(t); return; }    // VNA tab polling, not for the log
     log(t);
+    if (VN.expect) vnaReply(t);
     if (/^ptt on: /.test(t) && !/^ptt on: ok/.test(t) && TXA.ptt) setPtt(false, true);   // refused by the board
     const st = t.match(/^station: call (\S+) grid (\S+) power ([\d.]+) ft8hz (\d+)(?: xtal ([+-]?[\d.]+))?(?: at ([-\d.]+) C)?/m);
     if (st) stationApply(st[1], st[2], Number(st[3]), Number(st[4]), st[5], st[6]);
@@ -1262,7 +1263,7 @@ function ft8Tick() {
   }
   if (have < m.need) { $('ft8st').textContent = `slot ${hms(slot)}: only ${(have / 12000).toFixed(1)} s of audio, not decoded`; return; }
   if (!F.worker) {
-    F.worker = new Worker('ft8worker.js?v=d5ef2d3');
+    F.worker = new Worker('ft8worker.js?v=c89eeda');
     F.worker.onmessage = e => ft8Result(e.data);
     F.worker.onerror = e => { F.busy = false; log('FT8 worker: ' + e.message); };
   }
@@ -1856,6 +1857,7 @@ function vnaStatusText() {
   if (VN.running) t += ` · sweeping ${VN.done}/${VN.total}, about ${Math.ceil((VN.total - VN.done) * VN.msPt / 1000)} s left`;
   else if (VN.job !== 'idle' && VN.job !== 'sweep') t += ` · ${VN.job} ${VN.jk}/${VN.jn}`;
   if (VN.armed) t += ' · out-of-band armed';
+  if (VN.err) t += ` · board refused: ${VN.err}`;
   $('vnast').textContent = t;
   $('vnago').disabled = VN.running || VN.job !== 'idle'; $('vnastop').disabled = !VN.running && VN.job === 'idle';
 }
@@ -1879,6 +1881,16 @@ function vnaText(t) {
     if (n) vnaDraw();
   }
   vnaStatusText();
+}
+// first text after 'vna sweep' / 'vna cal': the board accepts with 'vna sweep: ...' / 'vna cal <std>: ...',
+// anything else is its refusal (RX_EN, TX, busy, calibration missing, ...)
+function vnaReply(t) {
+  if (/^vna (dis)?armed/.test(t)) return;              // the reply to a 'vna arm' sent just before
+  const kind = VN.expect; VN.expect = null;
+  if (/^vna (sweep|cal \w+): /.test(t)) return;
+  VN.err = t.trim().split('\n')[0];
+  if (kind === 'sweep') VN.running = false; else VN.job = 'idle';
+  vnaStatusText(); if (VN.calStep >= 0) vnaCalUpdate();
 }
 function vnaPoll(now) {
   clearTimeout(VN.timer);
@@ -1908,7 +1920,7 @@ async function vnaSweep() {
     if (!await vnaArm()) return;
   }
   const folds = Number($('vnafolds').value);
-  VN.pts = []; VN.sel = -1; VN.running = true; VN.done = 0; VN.total = n; VN.msPt = 75 + folds * 45;
+  VN.pts = []; VN.sel = -1; VN.running = true; VN.done = 0; VN.total = n; VN.msPt = 75 + folds * 45; VN.err = ''; VN.expect = 'sweep';
   await cmd(`vna sweep ${f1} ${f2} ${step} ${folds}`);
   vnaDraw(); vnaPoll(false);
 }
@@ -1923,10 +1935,11 @@ function vnaCsv() {
 // calibration wizard: load, open, short; each step a firmware sweep of about 4 minutes, followed by 'vna status'
 function vnaCalUpdate() {
   const li = [...$('vnacal').querySelectorAll('li')];
+  let failed = false;
   if (VN.calSeen === true && VN.job === 'idle') {      // the step's sweep ended
     VN.calSeen = false;
     if (VN.cal[VNA_STD[VN.calStep]] === 'ok') VN.calStep++;
-    else $('vnacalst').textContent = 'That step did not complete: start it again.';
+    else { $('vnacalst').textContent = VN.err ? `The board refused: ${VN.err}` : 'That step did not complete: start it again.'; failed = true; }
   }
   if (VN.job === VNA_STD[VN.calStep]) VN.calSeen = true;
   li.forEach((e, i) => { e.className = i < VN.calStep ? 'done' : i === VN.calStep ? 'cur' : ''; });
@@ -1937,12 +1950,12 @@ function vnaCalUpdate() {
   const busy = VN.job !== 'idle';
   $('vnacalgo').disabled = busy;
   if (busy) $('vnacalst').textContent = `Measuring ${VN.job}: ${VN.jk}/${VN.jn}, about ${Math.ceil((VN.jn - VN.jk) * 0.24 / 60)} min left. Do not touch J701.`;
-  else if (VN.calSeen !== 'done') $('vnacalst').textContent = `Step ${VN.calStep + 1} of 3: ${li[VN.calStep].textContent}, then Start.`;
+  else if (VN.calSeen !== 'done' && !failed) $('vnacalst').textContent = `Step ${VN.calStep + 1} of 3: ${li[VN.calStep].textContent}, then Start.`;
 }
 async function vnaCalStart() {
   if (!link) return;
   if (!await vnaArm()) return;
-  VN.calSeen = false;
+  VN.calSeen = false; VN.err = ''; VN.expect = 'cal';
   await cmd(`vna cal ${VNA_STD[VN.calStep]}`);
   VN.job = VNA_STD[VN.calStep]; VN.calSeen = true; vnaCalUpdate(); vnaPoll(false);
 }
@@ -2082,7 +2095,7 @@ function wsprTick() {
       if (have < 100 * 12000) $('wsprst').textContent = `period ${hm(period)}: only ${(have / 12000).toFixed(0)} s of audio, not decoded`;
       else {
         if (!WS.worker) {
-          WS.worker = new Worker('wsprworker.js?v=d5ef2d3');
+          WS.worker = new Worker('wsprworker.js?v=c89eeda');
           WS.worker.onmessage = e => wsprResult(e.data);
           WS.worker.onerror = e => { WS.busy = false; log('WSPR worker: ' + e.message); };
         }
