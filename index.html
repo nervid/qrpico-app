@@ -308,7 +308,7 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
       <div class="row" style="flex-wrap:wrap"><div class="seg" role="group" aria-label="VNA view"><button data-vv="ant" title="SWR, R and X of an antenna or line">Antenna</button><button data-vv="comp" title="L or C with series / parallel R, Q and self-resonance of a part on the fixture">Component</button></div>
         <select id="vnamodel" aria-label="Equivalent circuit" title="Equivalent circuit of the part" style="width:auto"><option value="s">series R + L / C</option><option value="p">parallel R ‖ L / C</option></select></div>
       <details class="panel" id="vnafix">
-        <summary>Coax and fixture</summary>
+        <summary id="vnafixsum">Coax and fixture</summary>
         <div class="vnafield" style="grid-template-columns: repeat(2, minmax(0, 1fr))">
           <label>coax length m<input id="vnalen" type="number" min="0" step="0.01" placeholder="e.g. 0.34" title="Length of the coax between J701 and the clips; sets the delay below"></label>
           <label>velocity factor<input id="vnavf" type="number" min="0.3" max="1" step="0.01" value="0.66" title="0.66 solid PE (RG58, RG174, RG316 0.70), 0.78-0.85 foam PE"></label>
@@ -460,10 +460,10 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
   <button id="mmute">Mute</button>
   <button id="mptt" class="ptt" aria-pressed="false">PTT</button>
 </div>
-<script src="ft8.js?v=f47538e"></script>
-<script src="ft4.js?v=f47538e"></script>
-<script src="wspr.js?v=f47538e"></script>
-<script src="cw.js?v=f47538e"></script>
+<script src="ft8.js?v=ace78ec"></script>
+<script src="ft4.js?v=ace78ec"></script>
+<script src="wspr.js?v=ace78ec"></script>
+<script src="cw.js?v=ace78ec"></script>
 <script>
 'use strict';
 // ---------------------------------------------------------------- protocol (docs/usb-protocol.md)
@@ -1376,7 +1376,7 @@ function ft8Tick() {
   }
   if (have < m.need) { $('ft8st').textContent = `slot ${hms(slot)}: only ${(have / 12000).toFixed(1)} s of audio, not decoded`; return; }
   if (!F.worker) {
-    F.worker = new Worker('ft8worker.js?v=f47538e');
+    F.worker = new Worker('ft8worker.js?v=ace78ec');
     F.worker.onmessage = e => ft8Result(e.data);
     F.worker.onerror = e => { F.busy = false; log('FT8 worker: ' + e.message); };
   }
@@ -1882,8 +1882,9 @@ const vnaSwr = r => r < 0.99 ? (1 + r) / (1 - r) : 99;
 // antenna view, 'at the antenna end': Gamma_load = Gamma_in exp(2 (alpha + j beta) l), the coax loss
 // (dB / 100 m at 10 MHz) scaled with sqrt(f); the line delay is the one of the length / velocity factor
 function vnaAntEnd(p) {
-  if (VN.vview !== 'ant' || !VF.antEnd || !VF.tau) return p;   // the component view has its own chain (vnaComp)
-  const a = 4 * Math.PI * p.f * VF.tau * 1e-12, lossDb = (VF.loss || 0) * Math.sqrt(p.f / 10e6) * (VF.len || 0) / 100;
+  const A = VF.ant;
+  if (VN.vview !== 'ant' || !A.on || !A.tau) return p;   // the component view has its own chain (vnaComp)
+  const a = 4 * Math.PI * p.f * A.tau * 1e-12, lossDb = (A.loss || 0) * Math.sqrt(p.f / 10e6) * (A.len || 0) / 100;
   const k = 10 ** (2 * lossDb / 20);                 // there and back
   let gre = k * (p.gre * Math.cos(a) - p.gim * Math.sin(a)), gim = k * (p.gre * Math.sin(a) + p.gim * Math.cos(a));
   const m = Math.hypot(gre, gim); if (m > 0.999) { gre *= 0.999 / m; gim *= 0.999 / m; }
@@ -1895,7 +1896,16 @@ function vnaPoint(p) {
   return { ...p, r, swr: vnaSwr(r), R: 50 * (1 - p.gre ** 2 - p.gim ** 2) / d, X: 50 * 2 * p.gim / d, ok: !(p.flags & 1) };
 }
 // ---- component view: port extension (delay), open / short fixture compensation, equivalent circuit
-const VF = Object.assign({ tau: 0, open: null, short: null }, store.get('vnafix', {}));
+// two separate lines: VF.ant = the antenna's feedline (antenna view, 'at the antenna end'), VF.fix = the line to
+// the clips of the component fixture (component view); open / short belong to the fixture
+const VF = Object.assign({ open: null, short: null }, store.get('vnafix', {}));
+if (!VF.ant) {                     // settings of the first version: one shared line (2026-11-19)
+  const fromLen = VF.len != null;
+  VF.ant = { len: fromLen ? VF.len : null, vf: VF.vf || 0.66, loss: VF.loss || 0, on: !!VF.antEnd, tau: fromLen ? VF.tau || 0 : 0 };
+  VF.fix = { len: null, vf: 0.66, tau: !fromLen && !VF.antEnd ? VF.tau || 0 : 0 };
+  for (const k of ['tau', 'len', 'vf', 'loss', 'antEnd']) delete VF[k];
+}
+const vnaLine = () => VN.vview === 'comp' ? VF.fix : VF.ant;
 const cx = (re, im = 0) => ({ re, im });
 const cadd = (a, b) => cx(a.re + b.re, a.im + b.im), csub = (a, b) => cx(a.re - b.re, a.im - b.im);
 const cmul = (a, b) => cx(a.re * b.re - a.im * b.im, a.re * b.im + a.im * b.re);
@@ -1903,7 +1913,7 @@ const cdiv = (a, b) => { const d = b.re * b.re + b.im * b.im; return cx((a.re * 
 const cabs = a => Math.hypot(a.re, a.im);
 // Z at the clips before the open / short step: Gamma rotated by the line delay (lossless 50 ohm line), then Z = 50 (1 + G) / (1 - G)
 function vnaZline(f, gre, gim) {
-  const a = 4 * Math.PI * f * VF.tau * 1e-12, g = cmul(cx(gre, gim), cx(Math.cos(a), Math.sin(a)));
+  const a = 4 * Math.PI * f * VF.fix.tau * 1e-12, g = cmul(cx(gre, gim), cx(Math.cos(a), Math.sin(a)));
   return { Z: cdiv(cmul(cx(50), cadd(cx(1), g)), csub(cx(1), g)), k: 100 / ((1 - g.re) ** 2 + g.im ** 2) };   // k = |dZ/dG|
 }
 // a stored standard at f: linear interpolation of Z (short) or Y (open) between its points, null outside its range
@@ -1930,6 +1940,10 @@ function vnaComp(p) {
   // series: L = X / w, C = -1 / (w X); parallel: C = B / w, L = -1 / (w B); relative error from dX / |X| (dB / |B| = same order)
   r.rel = dz / Math.max(Math.abs(z.im), 1e-12);
   r.Ls = z.im / w; r.Cs = -1 / (w * z.im); r.Lp = -1 / (w * y.im); r.Cp = y.im / w;
+  // resolution of R next to a reactance: the bench (100 pF, 2026-11-19) shows R scattering by a few % of |X|
+  // (calibration / model residue, far above the noise dz), so R and Q are given only above that
+  r.resR = Math.max(2 * dz, 0.05 * Math.abs(z.im));
+  r.rOk = Math.abs(z.re) > r.resR;
   // mostly resistive (|X| below a tenth of R or within its error): a resistor, judged by R instead of X
   r.resist = Math.abs(z.im) < Math.max(3 * dz, 0.1 * Math.abs(z.re));
   r.inRange = mag >= 2 && mag <= 2000 && (r.resist ? dz / Math.max(Math.abs(z.re), 1e-12) : r.rel) < 0.1;
@@ -2031,7 +2045,6 @@ function vnaPlot(cv, ser, [fa, fb], kind) {
       if (p.ok) { g.fillStyle = s.col; g.fill(); } else { g.strokeStyle = '#7d8794'; g.stroke(); }
     }
   }
-  if (kind === 'val') for (const f of VN.srf || []) { const x = X(f); g.strokeStyle = css('--warn'); g.setLineDash([4 * dpr, 4 * dpr]); g.beginPath(); g.moveTo(x, T); g.lineTo(x, T + ph); g.stroke(); g.setLineDash([]); g.fillStyle = css('--warn'); g.fillText('SRF', x + 3 * dpr, T + 14 * dpr); }
   if (VN.sel >= 0 && ser[VN.sel]) { const x = X(ser[VN.sel].f); g.strokeStyle = css('--tune'); g.beginPath(); g.moveTo(x, T); g.lineTo(x, T + ph); g.stroke(); }
   return { X, L, pw, fa, fb };
 }
@@ -2049,7 +2062,7 @@ function vnaDraw() {
     $('vnamin').textContent = `Minimum SWR ${b.swr.toFixed(2)} at ${(b.f / 1e6).toFixed(4)} MHz (Z ${b.R.toFixed(1)} ${b.X < 0 ? '−' : '+'} j${Math.abs(b.X).toFixed(1)} Ω). ${ser.length - good.length ? (ser.length - good.length) + ' unreliable point(s) hollow. ' : ''}${VN.pts.length > ser.length ? `${VN.pts.length} readings on ${ser.length} frequencies (the LO has discrete settings, readings on the same LO are averaged). ` : ''}Tap / click a curve for the values.`;
   }
 }
-// component view: the compensated impedance, L or C (by the sign of X at most good points), SRF at sign changes of X
+// component view: the compensated impedance, L, C or R by the sign / size of X at most good points
 function vnaDrawComp() {
   const model = $('vnamodel').value, raw = vnaSeries();
   const ser = raw.map(p => { const c = vnaComp(p); return { ...p, c, R: model === 'p' ? c.Rp : c.Rs, X: c.Xs, okRaw: p.ok }; });
@@ -2057,9 +2070,6 @@ function vnaDrawComp() {
   const nonR = good0.filter(p => !p.c.resist);
   VN.compInd = nonR.length < good0.length / 2 ? 'R' : nonR.filter(p => p.c.induct).length >= nonR.length / 2;
   const kindOf = c => c.resist ? 'R' : c.induct;
-  VN.srf = [];
-  for (let i = 1; i < good0.length; i++) if ((good0[i - 1].c.Xs > 0) !== (good0[i].c.Xs > 0) && Math.abs(good0[i].c.Xs - good0[i - 1].c.Xs) > 4 * (good0[i].c.dz + good0[i - 1].c.dz))
-    VN.srf.push(good0[i - 1].f + (good0[i].f - good0[i - 1].f) * Math.abs(good0[i - 1].c.Xs) / Math.abs(good0[i].c.Xs - good0[i - 1].c.Xs));
   for (const p of ser) { p.ok = p.okRaw && p.c.inRange; p.val = kindOf(p.c) === VN.compInd ? vnaVal(p.c, model, VN.compInd).v : NaN; }
   const rng = vnaRangeX(ser);
   VN.view = { ser, ...vnaPlot($('vnaswr'), ser, rng, 'val') };
@@ -2068,16 +2078,18 @@ function vnaDrawComp() {
   if (p) {
     const c = p.c, vs = vnaVal(c, "s", c.induct), vp = vnaVal(c, "p", c.induct), sym = c.induct ? 'L' : 'C';
     $('vnaro').innerHTML = `${(p.f / 1e6).toFixed(4)} MHz${p.ok ? '' : ' (out of range / unreliable)'}<br>Z ${c.Rs.toFixed(2)} ${c.Xs < 0 ? '−' : '+'} j${Math.abs(c.Xs).toFixed(2)} Ω ±${c.dz.toFixed(2)}` +
-      `<br>series: ${sym} ${eng(vs.v, vs.unit)} ±${eng(vs.dv, vs.unit, 2)}, R ${eng(c.Rs, 'Ω')}<br>parallel: ${sym} ${eng(vp.v, vp.unit)}, R ${eng(c.Rp, 'Ω')}<br>Q ${c.Q < 1000 ? c.Q.toFixed(1) : '> 1000'}${c.comp ? '' : ' (no fixture comp.)'}`;
+      `<br>series: ${sym} ${eng(vs.v, vs.unit)} ±${eng(vs.dv, vs.unit, 2)}, R ${c.rOk ? eng(c.Rs, 'Ω') : '< ' + eng(c.resR, 'Ω', 2)}` +
+      `<br>parallel: ${sym} ${eng(vp.v, vp.unit)}, R ${c.rOk ? eng(c.Rp, 'Ω') : '> ' + eng(c.Xs * c.Xs / c.resR, 'Ω', 2)}` +
+      `<br>Q ${c.rOk ? c.Q.toFixed(1) : '> ' + (Math.abs(c.Xs) / c.resR).toFixed(0)}${c.comp ? '' : ' (no fixture comp.)'}`;
   } else $('vnaro').innerHTML = '';
   const good = ser.filter(q => q.ok && Number.isFinite(q.val));
   if (!ser.length) { $('vnamin').textContent = 'Component view: put the part on J701 (or on clips after Fixture compensation) and sweep.'; return; }
   let t;
   if (good.length) {
     const vals = good.map(q => q.val).sort((a, b) => a - b), mid = good.reduce((a, q) => Math.abs(q.val - vals[vals.length >> 1]) < Math.abs(a.val - vals[vals.length >> 1]) ? q : a);
-    const v = vnaVal(mid.c, model, VN.compInd), qs = good.map(q => q.c.Q).sort((a, b) => a - b);
-    t = `${VN.compInd === 'R' ? 'Resistor' : VN.compInd ? 'Inductor' : 'Capacitor'}: ${eng(v.v, v.unit)} ±${eng(v.dv, v.unit, 2)} (${model === 'p' ? 'parallel' : 'series'}, median of ${good.length} points)${VN.compInd === 'R' ? `, X ${mid.c.Xs >= 0 ? '+' : '−'}${eng(Math.abs(mid.c.Xs), 'Ω')} (${mid.c.induct ? eng(mid.c.Ls, 'H') : eng(mid.c.Cp, 'F')} parasitic)` : `, R ${eng(v.R, 'Ω')}, Q about ${qs[qs.length >> 1] < 1000 ? qs[qs.length >> 1].toFixed(0) : '> 1000'}`}. `;
-    t += VN.srf.length ? `Self-resonance at ${VN.srf.map(f => (f / 1e6).toFixed(3)).join(', ')} MHz. ` : '';
+    const v = vnaVal(mid.c, model, VN.compInd), rs = good.filter(q => q.c.rOk), qs = rs.map(q => q.c.Q).sort((a, b) => a - b);
+    const rq = rs.length > good.length / 2 ? `R ${eng(v.R, 'Ω')}, Q about ${qs[qs.length >> 1].toFixed(0)}` : `R and Q below the resolution (Q > ${(Math.abs(mid.c.Xs) / mid.c.resR).toFixed(0)})`;
+    t = `${VN.compInd === 'R' ? 'Resistor' : VN.compInd ? 'Inductor' : 'Capacitor'}: ${eng(v.v, v.unit)} ±${eng(v.dv, v.unit, 2)} (${model === 'p' ? 'parallel' : 'series'}, median of ${good.length} points)${VN.compInd === 'R' ? `, X ${mid.c.Xs >= 0 ? '+' : '−'}${eng(Math.abs(mid.c.Xs), 'Ω')} (${mid.c.induct ? eng(mid.c.Ls, 'H') : eng(mid.c.Cp, 'F')} parasitic)` : `, ${rq}`}. `;
   } else t = 'No point in the usable range. ';
   const out = ser.filter(q => q.okRaw && !q.c.inRange);
   if (out.length) {
@@ -2085,7 +2097,7 @@ function vnaDrawComp() {
     t += `${out.length} point(s) outside the usable range (|Z| about 2 Ω … 2 kΩ, |X| ≥ 10 × its error): ` +
       (VN.compInd === 'R' ? 'outside 2 Ω … 2 kΩ the part cannot be measured here. ' : lowZ === VN.compInd ? 'measure at a higher frequency. ' : 'measure at a lower frequency. ');
   }
-  if (!VF.open && !VF.short && !VF.tau) t += 'No fixture compensation: values include the clips and leads.';
+  if (!VF.open && !VF.short && !VF.fix.tau) t += 'No fixture compensation: values include the clips and leads.';
   $('vnamin').textContent = t;
 }
 function vnaPick(ev) {
@@ -2221,28 +2233,31 @@ function vnaView(v) {
   VN.vview = v; store.set('vnaview', v); $('v-vna').dataset.vv = v;
   document.querySelectorAll('[data-vv]').forEach(b => b.classList.toggle('active', b.dataset.vv === v));
   $('vnamodel').hidden = v !== 'comp';
+  vnaFixText();
   $('vnaswr').setAttribute('aria-label', v === 'comp' ? 'Inductance or capacitance over frequency' : 'SWR over frequency');
   vnaDraw();
 }
 function vnaFixText() {
   const d = s => VF[s] ? `${s} ✓ (${(VF[s].f[0] / 1e6).toFixed(3)}–${(VF[s].f[VF[s].f.length - 1] / 1e6).toFixed(3)} MHz, ${VF[s].f.length} pts)` : `${s} –`;
-  $('vnafst').textContent = `${d('open')}, ${d('short')}, delay ${VF.tau} ps`;
-  $('vnatau').value = VF.tau;
-  $('vnavf').value = VF.vf || 0.66;
-  $('vnalen').value = VF.len != null ? VF.len : '';
-  $('vnaant').checked = !!VF.antEnd; $('vnaloss').value = VF.loss || 0;
+  const L = vnaLine();
+  $('vnafst').textContent = `fixture: ${d('open')}, ${d('short')}, line to the clips ${VF.fix.tau} ps`;
+  $('vnatau').value = L.tau;
+  $('vnavf').value = L.vf || 0.66;
+  $('vnalen').value = L.len != null ? L.len : '';
+  $('vnaant').checked = !!VF.ant.on; $('vnaloss').value = VF.ant.loss || 0;
+  $('vnafixsum').textContent = VN.vview === 'comp' ? 'Fixture (line to the clips, open / short)' : 'Antenna feedline';
 }
-$('vnaant').addEventListener('change', () => { VF.antEnd = $('vnaant').checked; store.set('vnafix', VF); vnaDraw(); });
-$('vnaloss').addEventListener('change', () => { VF.loss = Number($('vnaloss').value) || 0; store.set('vnafix', VF); vnaDraw(); });
+$('vnaant').addEventListener('change', () => { VF.ant.on = $('vnaant').checked; store.set('vnafix', VF); vnaDraw(); });
+$('vnaloss').addEventListener('change', () => { VF.ant.loss = Number($('vnaloss').value) || 0; store.set('vnafix', VF); vnaDraw(); });
 document.querySelectorAll('[data-vv]').forEach(b => b.addEventListener('click', () => vnaView(b.dataset.vv)));
 $('vnamodel').value = store.get('vnamodel', 's');
 $('vnamodel').addEventListener('change', () => { store.set('vnamodel', $('vnamodel').value); vnaDraw(); });
-$('vnatau').addEventListener('change', () => { VF.tau = Number($('vnatau').value) || 0; VF.len = null; store.set('vnafix', VF); vnaFixText(); vnaDraw(); });
+$('vnatau').addEventListener('change', () => { const L = vnaLine(); L.tau = Number($('vnatau').value) || 0; L.len = null; store.set('vnafix', VF); vnaFixText(); vnaDraw(); });
 // coax length and velocity factor -> one-way delay: tau = l / (VF c)
 function vnaLenTau() {
-  const l = Number($('vnalen').value), vf = Number($('vnavf').value) || 0.66;
-  VF.vf = vf;
-  if ($('vnalen').value !== '' && l >= 0) { VF.len = l; VF.tau = Math.round(l / (vf * 299792458) * 1e12); }
+  const l = Number($('vnalen').value), vf = Number($('vnavf').value) || 0.66, L = vnaLine();
+  L.vf = vf;
+  if ($('vnalen').value !== '' && l >= 0) { L.len = l; L.tau = Math.round(l / (vf * 299792458) * 1e12); }
   store.set('vnafix', VF); vnaFixText(); vnaDraw();
 }
 $('vnalen').addEventListener('change', vnaLenTau);
@@ -2257,13 +2272,13 @@ $('vnataub').addEventListener('click', () => {
     while (ph - prev < -Math.PI) { ph += 2 * Math.PI; off += 2 * Math.PI; }
     prev = ph; sfp += f * ph; sff += f * f;
   });
-  VF.tau = Math.round(-sfp / sff / (4 * Math.PI) * 1e12); VF.len = null;
-  store.set('vnafix', VF); vnaFixText(); vnaDraw(); toast(`Cable delay from the open: ${VF.tau} ps`);
+  VF.fix.tau = Math.round(-sfp / sff / (4 * Math.PI) * 1e12); VF.fix.len = null;
+  store.set('vnafix', VF); vnaFixText(); vnaDraw(); toast(`Line to the clips from the open: ${VF.fix.tau} ps`);
 });
 const vnaFixSweep = std => { VN.fixNext = std; vnaSweep(); };
 $('vnafo').addEventListener('click', () => vnaFixSweep('open'));
 $('vnafs').addEventListener('click', () => vnaFixSweep('short'));
-$('vnafx').addEventListener('click', () => { VF.open = VF.short = null; VF.tau = 0; VF.len = null; store.set('vnafix', VF); vnaFixText(); vnaDraw(); });
+$('vnafx').addEventListener('click', () => { VF.open = VF.short = null; VF.fix = { len: null, vf: 0.66, tau: 0 }; store.set('vnafix', VF); vnaFixText(); vnaDraw(); });
 vnaFixText(); vnaView(VN.vview);
 $('vnastop').addEventListener('click', () => { cmd('vna abort'); if (VN.calStep >= 0) VN.calSeen = false; vnaPoll(true); });
 $('vnacsv').addEventListener('click', vnaCsv);
@@ -2400,7 +2415,7 @@ function wsprTick() {
       if (have < 100 * 12000) $('wsprst').textContent = `period ${hm(period)}: only ${(have / 12000).toFixed(0)} s of audio, not decoded`;
       else {
         if (!WS.worker) {
-          WS.worker = new Worker('wsprworker.js?v=f47538e');
+          WS.worker = new Worker('wsprworker.js?v=ace78ec');
           WS.worker.onmessage = e => wsprResult(e.data);
           WS.worker.onerror = e => { WS.busy = false; log('WSPR worker: ' + e.message); };
         }
