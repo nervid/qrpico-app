@@ -259,6 +259,7 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
     </div>
     </div>
     <div id="v-cw" class="tabview" hidden>
+      <div class="row" id="cwdockrow" hidden><button id="cwdock" type="button"></button></div>
       <div class="cwscope" id="cwscope">
         <canvas id="cwsc"></canvas>
         <canvas id="cwsco"></canvas>
@@ -389,10 +390,10 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
   <button id="mmute">Mute</button>
   <button id="mptt" class="ptt" aria-pressed="false">PTT</button>
 </div>
-<script src="ft8.js?v=c89eeda"></script>
-<script src="ft4.js?v=c89eeda"></script>
-<script src="wspr.js?v=c89eeda"></script>
-<script src="cw.js?v=c89eeda"></script>
+<script src="ft8.js?v=1bf13ee"></script>
+<script src="ft4.js?v=1bf13ee"></script>
+<script src="wspr.js?v=1bf13ee"></script>
+<script src="cw.js?v=1bf13ee"></script>
 <script>
 'use strict';
 // ---------------------------------------------------------------- protocol (docs/usb-protocol.md)
@@ -1263,7 +1264,7 @@ function ft8Tick() {
   }
   if (have < m.need) { $('ft8st').textContent = `slot ${hms(slot)}: only ${(have / 12000).toFixed(1)} s of audio, not decoded`; return; }
   if (!F.worker) {
-    F.worker = new Worker('ft8worker.js?v=c89eeda');
+    F.worker = new Worker('ft8worker.js?v=1bf13ee');
     F.worker.onmessage = e => ft8Result(e.data);
     F.worker.onerror = e => { F.busy = false; log('FT8 worker: ' + e.message); };
   }
@@ -1716,16 +1717,21 @@ function cwShow() {
 })();
 
 // ---- view tabs: Spectrum (the wide RF view) and FT8 (audio waterfall, decodes, TX)
-// wide screens: in CW mode the CW panel stands next to the spectrum while the Spectrum tab is open
+// wide screens: in CW mode the CW panel can be docked next to the spectrum (the user's choice, kept per browser)
 const wideCw = matchMedia('(min-width: 1200px)');
+let cwDocked = store.get('cwdock', false);
 function cwLayout() {
-  const side = wideCw.matches && S.mode === 'cw' && V.tab === 'spec';
+  const can = wideCw.matches && S.mode === 'cw', side = can && cwDocked && V.tab === 'spec';
   document.querySelector('.view').classList.toggle('cwside', side);
+  $('cwdockrow').hidden = !can;
+  $('cwdock').textContent = side ? '✕ Close the CW panel' : cwDocked ? '✓ Docked next to the spectrum' : 'Dock next to the spectrum';
+  $('cwdock').setAttribute('aria-pressed', String(cwDocked));
   $('v-cw').hidden = !(side || V.tab === 'cw');
   if (side || V.tab === 'cw') cwShow();
   audioStream();
 }
 wideCw.addEventListener('change', () => { cwLayout(); drawSpectrum(); });
+$('cwdock').addEventListener('click', () => { cwDocked = !cwDocked; store.set('cwdock', cwDocked); cwLayout(); if (V.tab === 'spec') drawSpectrum(); });
 function setTab(tab) {
   V.tab = tab; store.set('tab', tab);
   document.querySelectorAll('[data-tab]').forEach(b => b.setAttribute('aria-selected', String(b.dataset.tab === tab)));
@@ -2095,7 +2101,7 @@ function wsprTick() {
       if (have < 100 * 12000) $('wsprst').textContent = `period ${hm(period)}: only ${(have / 12000).toFixed(0)} s of audio, not decoded`;
       else {
         if (!WS.worker) {
-          WS.worker = new Worker('wsprworker.js?v=c89eeda');
+          WS.worker = new Worker('wsprworker.js?v=1bf13ee');
           WS.worker.onmessage = e => wsprResult(e.data);
           WS.worker.onerror = e => { WS.busy = false; log('WSPR worker: ' + e.message); };
         }
