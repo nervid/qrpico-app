@@ -66,6 +66,17 @@ table.kv td:last-child { text-align: right; }
 body.offline .needlink { opacity: 0.45; pointer-events: none; }
 body.offline .linkchip { display: none; }
 .chip[hidden] { display: none; }
+.chips { display: contents; }
+@media (max-width: 520px) { .chips { display: flex; gap: 6px; order: 9; flex: 1 0 100%; overflow-x: auto; scrollbar-width: none; } .chips::-webkit-scrollbar { display: none; } }
+.note.help { display: none; }
+body.showhelp .note.help { display: block; }
+.toasts { position: fixed; right: 16px; bottom: 16px; z-index: 30; display: flex; flex-direction: column; gap: 8px; max-width: min(420px, calc(100vw - 32px)); pointer-events: none; }
+.toast { pointer-events: auto; background: var(--panel); color: var(--text); border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 8px; padding: 8px 12px; font-size: 13px; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25); }
+.toast.warn { border-left-color: var(--warn); }
+@media (pointer: coarse) { .toasts { bottom: 96px; } }
+.ft8row.head, .wsprrow.head { position: sticky; top: 0; z-index: 1; background: var(--bg); color: var(--muted); font-weight: 600; cursor: default; border-bottom: 1px solid var(--line); }
+.ft8row.head:hover { background: var(--bg); }
+.ft8row > .n, .wsprrow > .n { text-align: right; }
 .tabs button .dot { display: inline-block; width: 7px; height: 7px; margin-left: 5px; border-radius: 50%; background: var(--warn); vertical-align: middle; }
 .row { display: flex; gap: 6px; }
 .row input { flex: 1; min-width: 0; font: 12px var(--mono); }
@@ -91,9 +102,10 @@ label.inline { display: flex; gap: 6px; align-items: center; color: var(--muted)
 #ft8wfo { pointer-events: none; }
 #v-ft8 .ft8list { max-height: none; flex: 1; min-height: 200px; }
 .ft8list { font: 12px var(--mono); max-height: 280px; overflow-y: auto; margin-top: 6px; border-top: 1px solid var(--line); }
-.ft8row { display: grid; grid-template-columns: 5.2em 2.6em 3.2em 3.4em minmax(0, 1fr); gap: 0 6px; padding: 2px 0; }
-.ft8row > span:last-child { overflow-wrap: anywhere; }
-.ft8row.cq > span:last-child { color: var(--ok); font-weight: 600; }
+.ft8row { display: grid; grid-template-columns: 5.2em 2.6em 3.2em 3.4em minmax(0, 1fr) 4em 4.6em; gap: 0 6px; padding: 2px 4px; }
+@media (max-width: 520px) { .ft8row { grid-template-columns: 4.6em 2.4em 3.2em minmax(0, 1fr) 4.2em; } .ft8row .f-dt, .ft8row .f-grid { display: none; } }
+.ft8row > .msg { overflow-wrap: anywhere; }
+.ft8row.cq > .msg { color: var(--ok); font-weight: 600; }
 .ft8row.slot { border-top: 1px solid var(--line); margin-top: 2px; }
 .ft8row.head { color: var(--muted); }
 .wsprrow { display: grid; grid-template-columns: 3.4em 2.6em 3.2em 6.3em 2.4em minmax(0, 1fr) 3.6em 2.6em 4.2em; gap: 0 6px; padding: 2px 0; }
@@ -123,8 +135,8 @@ label.inline { display: flex; gap: 6px; align-items: center; color: var(--muted)
 @media (max-width: 520px) { .wsprrow { grid-template-columns: 3.2em 2.4em 5.8em minmax(0, 1fr) 3.3em 2.3em 4.6em; } .wsprrow .w-dt, .wsprrow .w-dr { display: none; } }
 .ft8row { cursor: pointer; border-radius: 4px; }
 .ft8row:hover { background: color-mix(in srgb, var(--line) 50%, transparent); }
-.ft8row.me > span:last-child { color: var(--warn); font-weight: 700; }
-.ft8row.mine > span:last-child { color: var(--muted); font-style: italic; }
+.ft8row.me > .msg { color: var(--warn); font-weight: 700; }
+.ft8row.mine > .msg { color: var(--muted); font-style: italic; }
 #ft8txmsg.tx { color: var(--warn); font-weight: 600; }
 .vnaplots { position: relative; display: flex; flex-direction: column; gap: 1px; border-radius: 8px; overflow: hidden; border: 1px solid var(--line); background: var(--spec-grid); flex: none; }
 #vnaro { background: rgba(13,17,23,0.75); padding: 2px 6px; border-radius: 4px; }
@@ -189,14 +201,14 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
   <button id="connect" class="primary">Connect</button>
   <button id="demo">Demo</button>
   <span id="st-conn" class="chip">not connected</span>
-  <span id="st-tx" class="chip linkchip" title="Transmit state (and the reason of the last TX end)">RX</span>
+  <span class="chips"><span id="st-tx" class="chip linkchip" title="Transmit state (and the reason of the last TX end)">RX</span>
   <span id="st-lo" class="chip linkchip" title="LO setting and NCO offset of the tuned frequency">LO –</span>
   <span id="st-pa" class="chip linkchip" title="PA temperature (PA_TEMP)">PA –</span>
   <span id="st-xtal" class="chip linkchip" title="Crystal correction">xtal –</span>
   <span id="st-audio" class="chip linkchip" hidden>audio</span>
-  <span id="st-load" class="chip linkchip" hidden>core 1 –</span>
+  <span id="st-load" class="chip linkchip" hidden>core 1 –</span></span>
   <span class="spacer"></span>
-  <button id="help" title="Keyboard and mouse">?</button>
+  <button id="help" title="Help: keys, mouse and the explanations under the controls">?</button>
   <button id="theme" title="Toggle light / dark">Theme</button>
 </header>
 <main>
@@ -229,13 +241,6 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
         <option value="0">2.8 kHz</option><option value="1">2.4 kHz</option><option value="2">1.8 kHz</option>
         <option value="3">500 Hz</option><option value="4">250 Hz</option><option value="5">10 kHz (AM)</option>
       </select>
-      <div class="group">
-        <button id="rxbtn" title="Start or stop the RX chain">RX start</button>
-        <select id="source" aria-label="Signal source" style="width:auto">
-          <option value="adc" title="PCM1808: antenna input">antenna</option>
-          <option value="test" title="digital test tones (Test source panel)">test</option>
-        </select>
-      </div>
       <span class="spacer"></span>
       <span id="sig" class="sig" title="Power in the receive passband (dBFS)">– dBFS</span>
     </div>
@@ -290,7 +295,7 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
         <span>his call</span><input id="cwhis" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="e.g. OE1XYZ" aria-label="Call of the other station">
         <span>speed</span><select id="cwwpm" aria-label="CW speed"><option>12</option><option>15</option><option>18</option><option selected>20</option><option>22</option><option>25</option><option>28</option><option>30</option></select>
       </div>
-      <p class="note" id="cwst">Sends Morse on the shown frequency (CW mode: you hear stations at 600 Hz when they are on it). The board keys itself and stops 0.6 s after the text; text typed while it sends is appended. Your call: Settings tab.</p>
+      <p class="note help" id="cwst">Sends Morse on the shown frequency (CW mode: you hear stations at 600 Hz when they are on it). The board keys itself and stops 0.6 s after the text; text typed while it sends is appended. Your call: Settings tab.</p>
     </div>
     <div id="v-vna" class="tabview" hidden>
       <div class="vnaplots">
@@ -299,6 +304,18 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
         <div id="vnaro" class="readout" aria-live="polite"></div>
       </div>
       <p class="note" style="margin:0" id="vnamin">Measures the load on J701 (antenna or DUT) with the receiver's injection. Tap / click a curve for the values.</p>
+      <div class="row" style="flex-wrap:wrap"><div class="seg" role="group" aria-label="VNA view"><button data-vv="ant" title="SWR, R and X of an antenna or line">Antenna</button><button data-vv="comp" title="L or C with series / parallel R, Q and self-resonance of a part on the fixture">Component</button></div>
+        <select id="vnamodel" aria-label="Equivalent circuit" title="Equivalent circuit of the part" style="width:auto"><option value="s">series R + L / C</option><option value="p">parallel R ‖ L / C</option></select></div>
+      <details class="panel" id="vnafix">
+        <summary>Fixture compensation (component view)</summary>
+        <div class="vnafield" style="grid-template-columns: repeat(2, minmax(0, 1fr))">
+          <label>cable delay ps (one way)<input id="vnatau" type="number" step="1" value="0" title="Port extension: delay of the line between J701 and the clips; about 5 ps per mm of PE coax (VF 0.66)"></label>
+          <label>&nbsp;<button id="vnataub" type="button" title="Delay from the stored open sweep (phase slope of an ideal open)">delay from open</button></label>
+        </div>
+        <div class="row" style="margin-top:6px;flex-wrap:wrap"><button id="vnafo" type="button" title="Clips open: sweep the present range and store it">Measure open</button><button id="vnafs" type="button" title="Clips shorted: sweep the present range and store it">Measure short</button><button id="vnafx" type="button">Clear</button></div>
+        <p class="note" id="vnafst"></p>
+        <p class="note help">Order: delay (port extension) for the line to the clips, then open / short at the clips (series impedance from the short, shunt admittance from the open, LCR-meter style). Measure open and short over the range you will use; outside it no compensation is applied.</p>
+      </details>
       <div class="row" id="vnaquick"><button data-r="7.0,7.2,5">40 m</button><button data-r="14.0,14.35,10">20 m</button><button data-r="28.0,29.7,50">10 m</button><button data-r="1,30,250" title="Leaves the amateur bands: needs the tick below">1 – 30 MHz</button></div>
       <div class="vnafield">
         <label>start MHz<input id="vnaf1" type="number" min="1" max="30" step="0.001" value="7.0"></label>
@@ -321,7 +338,7 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
         <canvas id="wsprwfo"></canvas>
         <div id="wsprro" class="readout"></div>
       </div>
-      <p class="note" style="margin:0">WSPR band: audio 1400 – 1600 Hz at the WSPR dial frequency. Tap / click to set the TX frequency (red).</p>
+      <p class="note help" style="margin:0">WSPR band: audio 1400 – 1600 Hz at the WSPR dial frequency. Tap / click to set the TX frequency (red).</p>
       <div class="row"><button id="wsprdial" title="Tune to the WSPR dial frequency of this band (USB)">WSPR frequency</button><button id="wspron">Decode WSPR</button><button id="wsprclear">Clear</button><button id="wsprfcb" title="Compare the frequencies of our spots with what other stations reported for the same transmissions (wspr.live, read only)">Freq. check</button></div>
       <p class="note" id="wsprfc" hidden></p>
       <div class="freqwarn" id="wsprfw" role="status" hidden><span></span><button type="button">Tune</button></div>
@@ -340,11 +357,11 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
         <canvas id="ft8wfo"></canvas>
         <div id="ft8ro" class="readout"></div>
       </div>
-      <p class="note" style="margin:0">Audio 0 – 3.2 kHz of the USB passband. Tap / click to set the TX frequency (red: your signal). Calls of the last slot at their frequency.</p>
+      <p class="note help" style="margin:0">Audio 0 – 3.2 kHz of the USB passband. Tap / click to set the TX frequency (red: your signal). Calls of the last slot at their frequency.</p>
       <div class="row"><select id="ft8mode" aria-label="Mode"><option value="FT8">FT8</option><option value="FT4">FT4</option></select><button id="ft8on">Decode FT8</button><button id="ft8clear">Clear</button></div>
       <div class="freqwarn" id="ft8fw" role="status" hidden><span></span><button type="button">Tune</button></div>
       <p class="note" id="ft8st">Decodes every slot (FT8 15 s, FT4 7.5 s) from the board's receive audio (USB, e.g. 14.074 MHz). Needs the PC / phone clock within about ±1 s (NTP).</p>
-      <div class="field" style="margin-top:6px">
+      <div class="field" style="margin-top:6px;max-width:320px">
         <span>TX audio</span><div class="row"><input id="ft8txf" type="number" min="200" max="2900" step="1" value="1500" aria-label="TX audio frequency in Hz" style="width:7em"><span class="unit">Hz</span></div>
       </div>
       <div class="row" style="margin-top:6px"><button id="ft8en" title="Master switch: transmissions only while this is on">Enable TX</button><button id="ft8cq">CQ</button><button id="ft8halt">Halt</button></div>
@@ -353,6 +370,10 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
       <div class="ft8list" id="ft8list" role="log" aria-label="FT8 decodes"></div>
     </div>
     <div id="v-con" class="tabview" hidden>
+      <details class="panel" id="p-status">
+        <summary>Status</summary>
+        <table class="kv" id="status"><tbody></tbody></table>
+      </details>
       <pre id="log" role="log" aria-label="Console output"></pre>
       <div class="row needlink"><input id="cmd" placeholder="command, e.g. rx stats or help (↑ history)" aria-label="Console command"><button id="send">Send</button><button id="logclear" type="button">Clear</button></div>
     </div>
@@ -373,6 +394,30 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
         </div>
         <p class="note">Measure needs this computer's clock NTP-synchronised (no TX, about a minute). FT8 / WSPR also need the clock within about ±1 s.</p>
       </div>
+      <div class="panel needlink">
+        <h2>Receiver</h2>
+        <div class="row"><button id="rxbtn" title="Start or stop the RX chain">RX start</button>
+          <select id="source" aria-label="Signal source" style="width:auto">
+            <option value="adc" title="PCM1808: antenna input">antenna</option>
+            <option value="test" title="digital test tones (Test source below)">test signal</option>
+          </select></div>
+        <p class="note">The app starts the receiver (antenna) by itself when it connects.</p>
+      </div>
+      <div class="panel">
+        <h2>Audio devices</h2>
+        <div class="field">
+        <span>from board</span><select id="ain" aria-label="Board audio input"><option value="">WebUSB stream</option></select>
+        <span>to</span><select id="aout" aria-label="Output device"><option value="">system default output</option></select>
+        <span>microphone</span><select id="mic" aria-label="Microphone"><option value="">(auto, never the board)</option></select>
+        <span>to board</span><select id="txout" aria-label="Board audio output"><option value="">WebUSB stream</option></select>
+        </div>
+        <p class="note">From board / to board: the WebUSB stream works everywhere; a USB audio device only with the board's headset profile. The microphone is never the board.</p>
+      </div>
+      <details class="panel needlink" id="p-test" style="max-width:640px">
+        <summary>Test source</summary>
+        <div class="row"><input id="t1" value="+1000 -40" aria-label="Tone 1: offset from tuned frequency in Hz, level dBFS"><input id="t2" value="+12000 -70" aria-label="Tone 2"></div>
+        <div class="row" style="margin-top:6px"><button id="tset">Set tones</button><span class="note">offset from the tuned frequency (Hz) and dBFS</span></div>
+      </details>
       <div class="panel">
         <h2>App</h2>
         <label class="inline"><input id="autoconn" type="checkbox" checked> connect automatically when the page opens (a board this browser was allowed to use before)</label>
@@ -382,11 +427,7 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
   <aside>
     <div class="panel needlink">
       <h2>RX audio</h2>
-      <div class="field">
-        <span>from board</span><select id="ain" aria-label="Board audio input"><option value="">WebUSB stream</option></select>
-        <span>to</span><select id="aout" aria-label="Output device"><option value="">system default output</option></select>
-      </div>
-      <div class="row" style="margin-top:8px"><button id="listen" class="primary">Listen</button><label class="inline" style="flex:1">vol <input id="avol" type="range" min="0" max="2" step="0.01" value="1" aria-label="Volume"></label><label class="inline"><input id="amute" type="checkbox"> mute</label></div>
+      <div class="row"><button id="listen" class="primary">Listen</button><label class="inline" style="flex:1">vol <input id="avol" type="range" min="0" max="2" step="0.01" value="1" aria-label="Volume"></label><label class="inline"><input id="amute" type="checkbox"> mute</label></div>
       <div class="row" style="margin-top:6px"><span class="note" style="margin:0">level</span><div class="meter"><div id="alevel"></div></div></div>
       <p class="note" id="anote">Plays the board's receive audio (USB / LSB) from the WebUSB stream, or from its USB audio input if one is chosen. Muted while transmitting.</p>
     </div>
@@ -394,8 +435,6 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
       <h2>TX</h2>
       <div class="field">
         <span>power</span><div class="row"><input id="txpwr" type="range" min="0.05" max="0.94" step="0.01" value="0.30" aria-label="TX PEP level"><span id="txpwrv" class="pwr"></span></div>
-        <span>microphone</span><select id="mic" aria-label="Microphone"><option value="">(auto, never the board)</option></select>
-        <span>to board</span><select id="txout" aria-label="Board audio output"><option value="">WebUSB stream</option></select>
       </div>
       <div class="row" style="margin-top:8px"><button id="micon">Mic on</button><label class="inline" style="flex:1;min-width:0">gain <input id="mgain" type="range" min="0" max="4" step="0.05" value="1" aria-label="Microphone gain"></label><label class="inline" title="compressor"><input id="mcomp" type="checkbox" checked> comp</label></div>
       <div class="row" style="margin-top:6px"><span class="note" style="margin:0">mic</span><div class="meter tx"><div id="mlevel"></div></div></div>
@@ -405,27 +444,19 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
       <div class="row" style="margin-top:6px"><label class="inline" title="Lift the PEP limit the board sets for a weak USB supply (default USB, e.g. a phone: about 0.4 W)"><input id="txovr" type="checkbox"> USB supply override</label></div>
       <p class="note" id="txnote">Mic on, then hold PTT: the microphone goes to the board (WebUSB stream, or its USB audio output if one is chosen) only while PTT is on.</p>
     </div>
-    <details class="panel" id="p-status">
-      <summary>Status</summary>
-      <table class="kv" id="status"><tbody></tbody></table>
-    </details>
-    <details class="panel needlink" id="p-test">
-      <summary>Test source</summary>
-      <div class="row"><input id="t1" value="+1000 -40" aria-label="Tone 1: offset from tuned frequency in Hz, level dBFS"><input id="t2" value="+12000 -70" aria-label="Tone 2"></div>
-      <div class="row" style="margin-top:6px"><button id="tset">Set tones</button><span class="note">offset from the tuned frequency (Hz) and dBFS</span></div>
-    </details>
   </aside>
 </main>
+<div class="toasts" id="toasts" aria-live="polite"></div>
 <!-- touch screens: Listen, Mute and a tap-to-toggle PTT always in reach -->
 <div id="mbar" class="mbar needlink" role="toolbar" aria-label="Quick controls">
   <button id="mlisten">Listen</button>
   <button id="mmute">Mute</button>
   <button id="mptt" class="ptt" aria-pressed="false">PTT</button>
 </div>
-<script src="ft8.js?v=d86532b"></script>
-<script src="ft4.js?v=d86532b"></script>
-<script src="wspr.js?v=d86532b"></script>
-<script src="cw.js?v=d86532b"></script>
+<script src="ft8.js?v=bb35715"></script>
+<script src="ft4.js?v=bb35715"></script>
+<script src="wspr.js?v=bb35715"></script>
+<script src="cw.js?v=bb35715"></script>
 <script>
 'use strict';
 // ---------------------------------------------------------------- protocol (docs/usb-protocol.md)
@@ -561,14 +592,14 @@ async function connectUsb(given) {
         try {
           const r = await dev.transferIn(epIn, 4096);
           if (r.data && r.data.byteLength) parser.push(new Uint8Array(r.data.buffer, r.data.byteOffset, r.data.byteLength));
-        } catch (e) { if (open) { log('USB: ' + e.message); if (link && link.kind === 'usb') link = null; setConn('disconnected', 'warn'); } open = false; }
+        } catch (e) { if (open) { log('USB: ' + e.message); if (link && link.kind === 'usb') { link = null; toast('Board connection lost: ' + e.message, true); } setConn('disconnected', 'warn'); } open = false; }
       }
     })();
     await cmd('stream on');
     await cmd('rx stats');
   } catch (e) { log('connect: ' + e.message); }
 }
-navigator.usb && navigator.usb.addEventListener('disconnect', () => { if (link && link.kind === 'usb') { link = null; setConn('disconnected', 'warn'); } });
+navigator.usb && navigator.usb.addEventListener('disconnect', () => { if (link && link.kind === 'usb') { link = null; setConn('disconnected', 'warn'); toast('Board unplugged', true); } });
 // the board comes back (replug, `usb profile` re-enumeration): reconnect without the chooser if it was ours
 navigator.usb && navigator.usb.addEventListener('connect', async e => {
   if (link || e.device.vendorId !== VID || e.device.productId !== PID) return;
@@ -791,6 +822,22 @@ function setConn(t, cls, title = '') { const c = $('st-conn'); c.textContent = t
 function linkUi() {
   document.body.classList.toggle('offline', !link);
   $('offline').hidden = !!link;
+  $('connect').textContent = link ? 'Disconnect' : 'Connect';
+  $('connect').classList.toggle('primary', !link);
+  $('demo').hidden = !!link;
+}
+async function disconnect() {
+  const l = link; link = null;
+  if (l) await l.close();
+  setConn('not connected');
+}
+// short messages that should not get lost in the console (refusals, TX ended, USB lost)
+function toast(msg, warn = false) {
+  const t = document.createElement('div'); t.className = 'toast' + (warn ? ' warn' : ''); t.textContent = msg;
+  t.addEventListener('click', () => t.remove());
+  $('toasts').appendChild(t);
+  while ($('toasts').children.length > 4) $('toasts').firstChild.remove();
+  setTimeout(() => t.remove(), warn ? 8000 : 5000);
 }
 async function cmd(line, quiet = false) { if (!link) { if (!quiet) log('not connected'); return; } if (!quiet) log('> ' + line); await link.send(T_CMD, enc.encode(line)); }
 
@@ -800,6 +847,7 @@ function onFrame(type, flags, p) {
     if (/^VNA[RS] /.test(t)) { vnaText(t); return; }    // VNA tab polling, not for the log
     log(t);
     if (VN.expect) vnaReply(t);
+    else if (/^refused|: refused|^cannot /i.test(t)) toast('Board: ' + t.trim().split('\n')[0], true);
     if (/^ptt on: /.test(t) && !/^ptt on: ok/.test(t) && TXA.ptt) setPtt(false, true);   // refused by the board
     const st = t.match(/^station: call (\S+) grid (\S+) power ([\d.]+) ft8hz (\d+)(?: xtal ([+-]?[\d.]+))?(?: at ([-\d.]+) C)?/m);
     if (st) stationApply(st[1], st[2], Number(st[3]), Number(st[4]), st[5], st[6]);
@@ -827,6 +875,11 @@ function xtalChip() {
 }
 function updateStatus() {
   const s = S.status;
+  if (S.autoRx) {
+    S.autoRx = false;
+    if (!s.rxEn && !s.paOn) cmd('rx on', true);
+    if (!s.running) cmd('rx start adc', true);
+  }
   S.wanted = s.wanted;
   digiWarn();
   if (V.tab === 'cw') cwShow();
@@ -874,7 +927,7 @@ function updateTxStatus(s) {
   if (TXA.ptt && S.txActive) TXA.sawActive = true;
   // the board ended a TX that the app still holds (keepalive, band, time-out ...): release locally
   if (TXA.ptt && TXA.sawActive && !S.txActive && s.txReason > 1) {
-    log(`TX ended by the board: ${txReasons[s.txReason]}`);
+    log(`TX ended by the board: ${txReasons[s.txReason]}`); toast(`TX ended by the board: ${txReasons[s.txReason]}`, true);
     setPtt(false, true);
   }
   $('blevel').style.width = Math.max(0, Math.min(100, (s.txRms + 60) / 60 * 100)) + '%';
@@ -1316,7 +1369,7 @@ function ft8Tick() {
   }
   if (have < m.need) { $('ft8st').textContent = `slot ${hms(slot)}: only ${(have / 12000).toFixed(1)} s of audio, not decoded`; return; }
   if (!F.worker) {
-    F.worker = new Worker('ft8worker.js?v=d86532b');
+    F.worker = new Worker('ft8worker.js?v=bb35715');
     F.worker.onmessage = e => ft8Result(e.data);
     F.worker.onerror = e => { F.busy = false; log('FT8 worker: ' + e.message); };
   }
@@ -1324,6 +1377,18 @@ function ft8Tick() {
   // phones (touch screen): the faster setting, about half the CPU for ~3 % fewer decodes (ft8.js)
   const fast = matchMedia('(pointer: coarse)').matches ? { stall: 6, maxCand2: 120 } : {};
   F.worker.postMessage({ slot, mode: F.mode, audio, opt: Object.assign({ fmin: 150, fmax: 3100 }, fast) }, [audio.buffer]);
+}
+// sticky column headers of the decode / spot lists (first child of the list, kept on Clear)
+const LIST_HEAD = {
+  ft8list: ['ft8row', [['UTC'], ['dB', 'n'], ['DT', 'n f-dt'], ['Hz', 'n'], ['Message', 'msg'], ['Grid', 'f-grid'], ['Dist.', 'n']]],
+  wsprlist: ['wsprrow', [['UTC'], ['dB', 'n'], ['DT', 'n w-dt'], ['MHz'], ['drift', 'n w-dr'], ['Call'], ['Grid'], ['dBm', 'n'], ['Dist.', 'n']]],
+};
+function listHead(list) {
+  if (list.firstChild && list.firstChild.classList.contains('head')) return;
+  const [cls, cols] = LIST_HEAD[list.id], h = document.createElement('div');
+  h.className = cls + ' head'; h.setAttribute('role', 'row');
+  for (const [t, c] of cols) { const e = document.createElement('span'); e.textContent = t; if (c) e.className = c; h.appendChild(e); }
+  list.insertBefore(h, list.firstChild);
 }
 const hms = t => new Date(t * 1000).toISOString().slice(11, 21).replace(/:/g, '').replace(/\.0$/, '');   // FT4 slots: 123007.5
 function ft8Result(r) {
@@ -1342,12 +1407,15 @@ function ft8Result(r) {
     row.setAttribute('role', 'button'); row.tabIndex = 0;
     row.addEventListener('click', () => ft8Answer(d, r.slot));
     row.addEventListener('keydown', e => { if (e.key === 'Enter') ft8Answer(d, r.slot); });
-    [hms(r.slot), String(d.snr), d.dt.toFixed(1), String(Math.round(d.freq)), d.text]
-      .forEach(t => { const c = document.createElement('span'); c.textContent = t; row.appendChild(c); });
+    const w = d.text.split(' '), g = w[w.length - 1], grid = /^[A-R]{2}[0-9]{2}$/.test(g) && g !== 'RR73' ? g : '';
+    const ll = grid && gridLL(grid), me = gridLL($('ft8grid').value);
+    [[hms(r.slot)], [String(d.snr), 'n'], [d.dt.toFixed(1), 'n f-dt'], [String(Math.round(d.freq)), 'n'], [d.text, 'msg'], [grid, 'f-grid'], [me && ll ? km(me, ll) + ' km' : '', 'n']]
+      .forEach(([t, cls]) => { const c = document.createElement('span'); c.textContent = t; if (cls) c.className = cls; row.appendChild(c); });
     frag.appendChild(row);
   });
   const atTop = list.scrollTop < 8;
-  list.insertBefore(frag, list.firstChild);
+  listHead(list);
+  list.insertBefore(frag, list.children[1] || null);
   while (list.children.length > 300) list.removeChild(list.lastChild);
   if (atTop) list.scrollTop = 0;
   // waterfall labels: the sender (2nd word, or the call after CQ) at the RF frequency of the signal
@@ -1380,7 +1448,7 @@ function ft8SetMode(mode) {
 $('ft8mode').addEventListener('change', () => ft8SetMode($('ft8mode').value));
 ft8LogCount();
 ['ft8fw', 'wsprfw'].forEach(id => $(id).querySelector('button').addEventListener('click', () => { tune(Number($(id).dataset.f)); setMode('usb'); setFilter(0); }));
-$('ft8clear').addEventListener('click', () => { $('ft8list').textContent = ''; F.marks = []; drawWfOverlay(); });
+$('ft8clear').addEventListener('click', () => { $('ft8list').textContent = ''; listHead($('ft8list')); F.marks = []; drawWfOverlay(); });
 setInterval(ft8Tick, 250);
 
 // ---- FT8 TX: one QSO at a time, WSJT-X style sequence; the board makes the waveform (ft8 load + PTT)
@@ -1808,6 +1876,59 @@ function vnaPoint(p) {
   const r = Math.hypot(p.gre, p.gim), d = (1 - p.gre) ** 2 + p.gim ** 2;
   return { ...p, r, swr: vnaSwr(r), R: 50 * (1 - p.gre ** 2 - p.gim ** 2) / d, X: 50 * 2 * p.gim / d, ok: !(p.flags & 1) };
 }
+// ---- component view: port extension (delay), open / short fixture compensation, equivalent circuit
+const VF = Object.assign({ tau: 0, open: null, short: null }, store.get('vnafix', {}));
+const cx = (re, im = 0) => ({ re, im });
+const cadd = (a, b) => cx(a.re + b.re, a.im + b.im), csub = (a, b) => cx(a.re - b.re, a.im - b.im);
+const cmul = (a, b) => cx(a.re * b.re - a.im * b.im, a.re * b.im + a.im * b.re);
+const cdiv = (a, b) => { const d = b.re * b.re + b.im * b.im; return cx((a.re * b.re + a.im * b.im) / d, (a.im * b.re - a.re * b.im) / d); };
+const cabs = a => Math.hypot(a.re, a.im);
+// Z at the clips before the open / short step: Gamma rotated by the line delay (lossless 50 ohm line), then Z = 50 (1 + G) / (1 - G)
+function vnaZline(f, gre, gim) {
+  const a = 4 * Math.PI * f * VF.tau * 1e-12, g = cmul(cx(gre, gim), cx(Math.cos(a), Math.sin(a)));
+  return { Z: cdiv(cmul(cx(50), cadd(cx(1), g)), csub(cx(1), g)), k: 100 / ((1 - g.re) ** 2 + g.im ** 2) };   // k = |dZ/dG|
+}
+// a stored standard at f: linear interpolation of Z (short) or Y (open) between its points, null outside its range
+function vnaStd(std, f) {
+  const d = VF[std]; if (!d || d.f.length < 1) return null;
+  const n = d.f.length, tol = n > 1 ? 0.6 * (d.f[n - 1] - d.f[0]) / (n - 1) : 2e4;
+  if (f < d.f[0] - tol || f > d.f[n - 1] + tol) return null;
+  const v = i => { const z = vnaZline(d.f[i], d.re[i], d.im[i]).Z; return std === 'open' ? cdiv(cx(1), z) : z; };
+  let i = 0; while (i < n - 2 && f > d.f[i + 1]) i++;
+  if (n === 1) return v(0);
+  const t = Math.min(1, Math.max(0, (f - d.f[i]) / (d.f[i + 1] - d.f[i]))), a = v(i), b = v(i + 1);
+  return cx(a.re + t * (b.re - a.re), a.im + t * (b.im - a.im));
+}
+// DUT impedance: Zd = 1 / (1 / (Zm - Zs) - Yo), Yo = 1 / (Zo - Zs) (series Zs, then shunt Yo, as in an LCR meter)
+function vnaComp(p) {
+  const { Z: zm, k } = vnaZline(p.f, p.gre, p.gim), zs = vnaStd('short', p.f), yom = vnaStd('open', p.f);
+  let z = zs ? csub(zm, zs) : zm, comp = !!(zs || yom);
+  if (yom) { const yo = zs ? cdiv(cx(1), csub(cdiv(cx(1), yom), zs)) : yom; z = cdiv(cx(1), csub(cdiv(cx(1), z), yo)); }
+  const w = 2 * Math.PI * p.f, dz = k * p.err, y = cdiv(cx(1), z), mag = cabs(z);
+  const r = { Rs: z.re, Xs: z.im, Gp: y.re, Bp: y.im, mag, dz, comp, w };
+  r.Q = Math.abs(z.im) / Math.max(Math.abs(z.re), 1e-9);
+  r.Rp = 1 / y.re;
+  r.induct = z.im > 0;
+  // series: L = X / w, C = -1 / (w X); parallel: C = B / w, L = -1 / (w B); relative error from dX / |X| (dB / |B| = same order)
+  r.rel = dz / Math.max(Math.abs(z.im), 1e-12);
+  r.Ls = z.im / w; r.Cs = -1 / (w * z.im); r.Lp = -1 / (w * y.im); r.Cp = y.im / w;
+  // mostly resistive (|X| below a tenth of R or within its error): a resistor, judged by R instead of X
+  r.resist = Math.abs(z.im) < Math.max(3 * dz, 0.1 * Math.abs(z.re));
+  r.inRange = mag >= 2 && mag <= 2000 && (r.resist ? dz / Math.max(Math.abs(z.re), 1e-12) : r.rel) < 0.1;
+  return r;
+}
+const ENG = [[1e-12, 'p'], [1e-9, 'n'], [1e-6, 'µ'], [1e-3, 'm'], [1, ''], [1e3, 'k'], [1e6, 'M']];
+function eng(v, unit, digits = 3) {
+  if (!Number.isFinite(v)) return '–';
+  const a = Math.abs(v), e = ENG.reduce((b, x) => a >= x[0] * 0.9995 ? x : b, ENG[0]);
+  return `${+(v / e[0]).toPrecision(digits)} ${e[1]}${unit}`;
+}
+// value of the part in the chosen model (L in H or C in F) and its uncertainty
+function vnaVal(c, model, induct) {
+  if (induct === 'R') return { v: model === 'p' ? c.Rp : c.Rs, dv: c.dz, unit: 'Ω', R: model === 'p' ? c.Rp : c.Rs };
+  const v = induct ? (model === 'p' ? c.Lp : c.Ls) : (model === 'p' ? c.Cp : c.Cs);
+  return { v, dv: Math.abs(v) * c.rel, unit: induct ? 'H' : 'F', R: model === 'p' ? c.Rp : c.Rs };
+}
 // sorted, readings on the same LO merged
 function vnaSeries() {
   const m = new Map();
@@ -1854,6 +1975,14 @@ function vnaPlot(cv, ser, [fa, fb], kind) {
     Y = s => T + ph - Math.log(Math.min(Math.max(s, 1), top)) / Math.log(top) * ph;
     yt = [1, 1.5, 2, 3, 5, 10, 20, 50, 100].filter(v => v <= top); lab = v => String(v);
     series = [{ key: 'swr', col: css('--spec-line') }];
+  } else if (kind === 'val') {
+    const vals = good.map(p => p.val).filter(Number.isFinite);
+    const sc = vals.length ? ENG.reduce((b, x) => Math.abs(vals[vals.length >> 1]) >= x[0] * 0.9995 ? x : b, ENG[0]) : [1, ''];
+    let lo = vals.length ? Math.min(...vals) : 0, hi = vals.length ? Math.max(...vals) : 1;
+    const span = Math.max(hi - lo, Math.abs(hi) * 0.05) || 1, c0 = (hi + lo) / 2; lo = c0 - span * 0.6; hi = c0 + span * 0.6;
+    Y = v => T + ph - (Math.min(Math.max(v, lo), hi) - lo) / (hi - lo) * ph;
+    yt = vnaTicks(lo / sc[0], hi / sc[0], 5).map(v => v * sc[0]); lab = v => String(+(v / sc[0]).toPrecision(3));
+    series = [{ key: 'val', col: css('--spec-line'), title: VN.compInd === 'R' ? `R ${sc[1]}Ω` : `${VN.compInd ? 'L' : 'C'} ${sc[1]}${VN.compInd ? 'H' : 'F'}` }];
   } else {
     const vals = good.flatMap(p => [p.R, p.X]).filter(Number.isFinite);
     let lo = Math.min(0, ...vals), hi = Math.max(60, ...vals); const pad = (hi - lo) * 0.08; lo -= pad; hi += pad;
@@ -1867,8 +1996,8 @@ function vnaPlot(cv, ser, [fa, fb], kind) {
   for (const v of vnaTicks(fa / 1e6, fb / 1e6, Math.max(2, Math.floor(pw / (70 * dpr))))) {
     const x = X(v * 1e6); g.beginPath(); g.moveTo(x, T); g.lineTo(x, T + ph); g.stroke(); g.fillText(+v.toFixed(4) + '', x, T + ph + 4 * dpr);
   }
-  g.textAlign = 'left'; g.fillText(kind === 'swr' ? 'SWR' : 'R / X Ω', L + 4 * dpr, T + 2 * dpr);
-  if (kind !== 'swr') { g.fillStyle = css('--ok'); g.fillText('R', L + 70 * dpr, T + 2 * dpr); g.fillStyle = css('--warn'); g.fillText('X', L + 84 * dpr, T + 2 * dpr); }
+  g.textAlign = 'left'; g.fillText(kind === 'swr' ? 'SWR' : kind === 'val' ? series[0].title : 'R / X Ω', L + 4 * dpr, T + 2 * dpr);
+  if (kind === 'zx') { g.fillStyle = css('--ok'); g.fillText('R', L + 70 * dpr, T + 2 * dpr); g.fillStyle = css('--warn'); g.fillText('X', L + 84 * dpr, T + 2 * dpr); }
   for (const s of series) {
     if (good.length > 1) {
       const xs = good.map(p => p.f), f = vnaMono(xs, good.map(p => p[s.key]));
@@ -1879,15 +2008,18 @@ function vnaPlot(cv, ser, [fa, fb], kind) {
       g.stroke(); g.lineWidth = dpr;
     }
     for (const p of ser) {
+      if (!Number.isFinite(p[s.key])) continue;
       const x = X(p.f), y = Y(p[s.key]); g.beginPath(); g.arc(x, y, 2.5 * dpr, 0, 2 * Math.PI);
       if (p.ok) { g.fillStyle = s.col; g.fill(); } else { g.strokeStyle = '#7d8794'; g.stroke(); }
     }
   }
+  if (kind === 'val') for (const f of VN.srf || []) { const x = X(f); g.strokeStyle = css('--warn'); g.setLineDash([4 * dpr, 4 * dpr]); g.beginPath(); g.moveTo(x, T); g.lineTo(x, T + ph); g.stroke(); g.setLineDash([]); g.fillStyle = css('--warn'); g.fillText('SRF', x + 3 * dpr, T + 14 * dpr); }
   if (VN.sel >= 0 && ser[VN.sel]) { const x = X(ser[VN.sel].f); g.strokeStyle = css('--tune'); g.beginPath(); g.moveTo(x, T); g.lineTo(x, T + ph); g.stroke(); }
   return { X, L, pw, fa, fb };
 }
 function vnaDraw() {
   if ($('v-vna').hidden) return;
+  if (VN.vview === 'comp') { vnaDrawComp(); return; }
   const ser = vnaSeries(), rng = vnaRangeX(ser);
   VN.view = { ser, ...vnaPlot($('vnaswr'), ser, rng, 'swr') };
   vnaPlot($('vnazx'), ser, rng, 'zx');
@@ -1898,6 +2030,45 @@ function vnaDraw() {
     const b = good.reduce((a, q) => q.swr < a.swr ? q : a);
     $('vnamin').textContent = `Minimum SWR ${b.swr.toFixed(2)} at ${(b.f / 1e6).toFixed(4)} MHz (Z ${b.R.toFixed(1)} ${b.X < 0 ? '−' : '+'} j${Math.abs(b.X).toFixed(1)} Ω). ${ser.length - good.length ? (ser.length - good.length) + ' unreliable point(s) hollow. ' : ''}${VN.pts.length > ser.length ? `${VN.pts.length} readings on ${ser.length} frequencies (the LO has discrete settings, readings on the same LO are averaged). ` : ''}Tap / click a curve for the values.`;
   }
+}
+// component view: the compensated impedance, L or C (by the sign of X at most good points), SRF at sign changes of X
+function vnaDrawComp() {
+  const model = $('vnamodel').value, raw = vnaSeries();
+  const ser = raw.map(p => { const c = vnaComp(p); return { ...p, c, R: model === 'p' ? c.Rp : c.Rs, X: c.Xs, okRaw: p.ok }; });
+  const good0 = ser.filter(p => p.okRaw);
+  const nonR = good0.filter(p => !p.c.resist);
+  VN.compInd = nonR.length < good0.length / 2 ? 'R' : nonR.filter(p => p.c.induct).length >= nonR.length / 2;
+  const kindOf = c => c.resist ? 'R' : c.induct;
+  VN.srf = [];
+  for (let i = 1; i < good0.length; i++) if ((good0[i - 1].c.Xs > 0) !== (good0[i].c.Xs > 0) && Math.abs(good0[i].c.Xs - good0[i - 1].c.Xs) > 4 * (good0[i].c.dz + good0[i - 1].c.dz))
+    VN.srf.push(good0[i - 1].f + (good0[i].f - good0[i - 1].f) * Math.abs(good0[i - 1].c.Xs) / Math.abs(good0[i].c.Xs - good0[i - 1].c.Xs));
+  for (const p of ser) { p.ok = p.okRaw && p.c.inRange; p.val = kindOf(p.c) === VN.compInd ? vnaVal(p.c, model, VN.compInd).v : NaN; }
+  const rng = vnaRangeX(ser);
+  VN.view = { ser, ...vnaPlot($('vnaswr'), ser, rng, 'val') };
+  vnaPlot($('vnazx'), ser, rng, 'zx');
+  const p = ser[VN.sel];
+  if (p) {
+    const c = p.c, vs = vnaVal(c, "s", c.induct), vp = vnaVal(c, "p", c.induct), sym = c.induct ? 'L' : 'C';
+    $('vnaro').innerHTML = `${(p.f / 1e6).toFixed(4)} MHz${p.ok ? '' : ' (out of range / unreliable)'}<br>Z ${c.Rs.toFixed(2)} ${c.Xs < 0 ? '−' : '+'} j${Math.abs(c.Xs).toFixed(2)} Ω ±${c.dz.toFixed(2)}` +
+      `<br>series: ${sym} ${eng(vs.v, vs.unit)} ±${eng(vs.dv, vs.unit, 2)}, R ${eng(c.Rs, 'Ω')}<br>parallel: ${sym} ${eng(vp.v, vp.unit)}, R ${eng(c.Rp, 'Ω')}<br>Q ${c.Q < 1000 ? c.Q.toFixed(1) : '> 1000'}${c.comp ? '' : ' (no fixture comp.)'}`;
+  } else $('vnaro').innerHTML = '';
+  const good = ser.filter(q => q.ok && Number.isFinite(q.val));
+  if (!ser.length) { $('vnamin').textContent = 'Component view: put the part on J701 (or on clips after Fixture compensation) and sweep.'; return; }
+  let t;
+  if (good.length) {
+    const vals = good.map(q => q.val).sort((a, b) => a - b), mid = good.reduce((a, q) => Math.abs(q.val - vals[vals.length >> 1]) < Math.abs(a.val - vals[vals.length >> 1]) ? q : a);
+    const v = vnaVal(mid.c, model, VN.compInd), qs = good.map(q => q.c.Q).sort((a, b) => a - b);
+    t = `${VN.compInd === 'R' ? 'Resistor' : VN.compInd ? 'Inductor' : 'Capacitor'}: ${eng(v.v, v.unit)} ±${eng(v.dv, v.unit, 2)} (${model === 'p' ? 'parallel' : 'series'}, median of ${good.length} points)${VN.compInd === 'R' ? `, X ${mid.c.Xs >= 0 ? '+' : '−'}${eng(Math.abs(mid.c.Xs), 'Ω')} (${mid.c.induct ? eng(mid.c.Ls, 'H') : eng(mid.c.Cp, 'F')} parasitic)` : `, R ${eng(v.R, 'Ω')}, Q about ${qs[qs.length >> 1] < 1000 ? qs[qs.length >> 1].toFixed(0) : '> 1000'}`}. `;
+    t += VN.srf.length ? `Self-resonance at ${VN.srf.map(f => (f / 1e6).toFixed(3)).join(', ')} MHz. ` : '';
+  } else t = 'No point in the usable range. ';
+  const out = ser.filter(q => q.okRaw && !q.c.inRange);
+  if (out.length) {
+    const lowZ = out.filter(q => q.c.mag < 2 || Math.abs(q.c.Xs) < 10 * q.c.dz).length > out.length / 2;
+    t += `${out.length} point(s) outside the usable range (|Z| about 2 Ω … 2 kΩ, |X| ≥ 10 × its error): ` +
+      (VN.compInd === 'R' ? 'outside 2 Ω … 2 kΩ the part cannot be measured here. ' : lowZ === VN.compInd ? 'measure at a higher frequency. ' : 'measure at a lower frequency. ');
+  }
+  if (!VF.open && !VF.short && !VF.tau) t += 'No fixture compensation: values include the clips and leads.';
+  $('vnamin').textContent = t;
 }
 function vnaPick(ev) {
   const v = VN.view; if (!v || !v.ser.length) return;
@@ -1936,7 +2107,14 @@ function vnaText(t) {
       VN.pts.push({ f: +p[1], band: +p[2], gre: +p[3], gim: +p[4], err: +p[5], flags: +p[6] }); n++;
     }
     if (+h[4]) log(`VNA: ${h[4]} points dropped on the board (read too slowly)`);
-    if (!running && !n && VN.running) { VN.running = false; log(`VNA sweep done: ${VN.pts.length} points`); }
+    if (!running && !n && VN.running) {
+      VN.running = false; log(`VNA sweep done: ${VN.pts.length} points`);
+      if (VN.fixNext) {                    // a fixture standard: keep the raw Gamma per frequency
+        const ser = vnaSeries().filter(p => p.ok);
+        VF[VN.fixNext] = { f: ser.map(p => p.f), re: ser.map(p => p.gre), im: ser.map(p => p.gim) };
+        store.set('vnafix', VF); toast(`Fixture ${VN.fixNext} stored: ${ser.length} points`); VN.fixNext = null; vnaFixText();
+      }
+    }
     if (n) vnaDraw();
   }
   vnaStatusText();
@@ -1947,7 +2125,7 @@ function vnaReply(t) {
   if (/^vna (dis)?armed/.test(t)) return;              // the reply to a 'vna arm' sent just before
   const kind = VN.expect; VN.expect = null;
   if (/^vna (sweep|cal \w+): /.test(t)) return;
-  VN.err = t.trim().split('\n')[0];
+  VN.err = t.trim().split('\n')[0]; toast('VNA: board refused: ' + VN.err, true);
   if (kind === 'sweep') VN.running = false; else VN.job = 'idle';
   vnaStatusText(); if (VN.calStep >= 0) vnaCalUpdate();
 }
@@ -2019,6 +2197,42 @@ async function vnaCalStart() {
   VN.job = VNA_STD[VN.calStep]; VN.calSeen = true; vnaCalUpdate(); vnaPoll(false);
 }
 $('vnago').addEventListener('click', vnaSweep);
+// view switch and fixture compensation
+VN.vview = store.get('vnaview', 'ant');
+function vnaView(v) {
+  VN.vview = v; store.set('vnaview', v);
+  document.querySelectorAll('[data-vv]').forEach(b => b.classList.toggle('active', b.dataset.vv === v));
+  $('vnamodel').hidden = $('vnafix').hidden = v !== 'comp';
+  $('vnaswr').setAttribute('aria-label', v === 'comp' ? 'Inductance or capacitance over frequency' : 'SWR over frequency');
+  vnaDraw();
+}
+function vnaFixText() {
+  const d = s => VF[s] ? `${s} ✓ (${(VF[s].f[0] / 1e6).toFixed(3)}–${(VF[s].f[VF[s].f.length - 1] / 1e6).toFixed(3)} MHz, ${VF[s].f.length} pts)` : `${s} –`;
+  $('vnafst').textContent = `${d('open')}, ${d('short')}, delay ${VF.tau} ps`;
+  $('vnatau').value = VF.tau;
+}
+document.querySelectorAll('[data-vv]').forEach(b => b.addEventListener('click', () => vnaView(b.dataset.vv)));
+$('vnamodel').value = store.get('vnamodel', 's');
+$('vnamodel').addEventListener('change', () => { store.set('vnamodel', $('vnamodel').value); vnaDraw(); });
+$('vnatau').addEventListener('change', () => { VF.tau = Number($('vnatau').value) || 0; store.set('vnafix', VF); vnaFixText(); vnaDraw(); });
+// delay from the open: an ideal open has Gamma = exp(-j 4 pi f tau); least squares of the unwrapped phase through the origin
+$('vnataub').addEventListener('click', () => {
+  const d = VF.open; if (!d || d.f.length < 2) { toast('Measure the open first', true); return; }
+  let prev = 0, off = 0, sfp = 0, sff = 0;
+  d.f.forEach((f, i) => {
+    let ph = Math.atan2(d.im[i], d.re[i]) + off;
+    while (ph - prev > Math.PI) { ph -= 2 * Math.PI; off -= 2 * Math.PI; }
+    while (ph - prev < -Math.PI) { ph += 2 * Math.PI; off += 2 * Math.PI; }
+    prev = ph; sfp += f * ph; sff += f * f;
+  });
+  VF.tau = Math.round(-sfp / sff / (4 * Math.PI) * 1e12);
+  store.set('vnafix', VF); vnaFixText(); vnaDraw(); toast(`Cable delay from the open: ${VF.tau} ps`);
+});
+const vnaFixSweep = std => { VN.fixNext = std; vnaSweep(); };
+$('vnafo').addEventListener('click', () => vnaFixSweep('open'));
+$('vnafs').addEventListener('click', () => vnaFixSweep('short'));
+$('vnafx').addEventListener('click', () => { VF.open = VF.short = null; VF.tau = 0; store.set('vnafix', VF); vnaFixText(); vnaDraw(); });
+vnaFixText(); vnaView(VN.vview);
 $('vnastop').addEventListener('click', () => { cmd('vna abort'); if (VN.calStep >= 0) VN.calSeen = false; vnaPoll(true); });
 $('vnacsv').addEventListener('click', vnaCsv);
 $('vnacalb').addEventListener('click', () => {
@@ -2154,7 +2368,7 @@ function wsprTick() {
       if (have < 100 * 12000) $('wsprst').textContent = `period ${hm(period)}: only ${(have / 12000).toFixed(0)} s of audio, not decoded`;
       else {
         if (!WS.worker) {
-          WS.worker = new Worker('wsprworker.js?v=d86532b');
+          WS.worker = new Worker('wsprworker.js?v=bb35715');
           WS.worker.onmessage = e => wsprResult(e.data);
           WS.worker.onerror = e => { WS.busy = false; log('WSPR worker: ' + e.message); };
         }
@@ -2226,12 +2440,13 @@ function wsprResult(r) {
     const row = document.createElement('div'), ll = gridLL(d.grid);
     row.className = 'wsprrow' + (i === 0 ? ' slot' : '');
     const mhz = ((dial + (usb ? 1 : -1) * d.freq) / 1e6).toFixed(6);
-    [[hm(r.period)], [String(d.snr)], [d.dt.toFixed(1), 'w-dt'], [mhz], [String(d.drift), 'w-dr'], [d.call], [d.grid], [String(d.dbm)], [me && ll ? km(me, ll) + ' km' : '']]
+    [[hm(r.period)], [String(d.snr), 'n'], [d.dt.toFixed(1), 'n w-dt'], [mhz], [String(d.drift), 'n w-dr'], [d.call], [d.grid], [String(d.dbm), 'n'], [me && ll ? km(me, ll) + ' km' : '', 'n']]
       .forEach(([t, cls]) => { const c = document.createElement('span'); c.textContent = t; if (cls) c.className = cls; row.appendChild(c); });
     frag.appendChild(row);
   });
   const atTop = list.scrollTop < 8;
-  list.insertBefore(frag, list.firstChild);
+  listHead(list);
+  list.insertBefore(frag, list.children[1] || null);
   while (list.children.length > 400) list.removeChild(list.lastChild);
   if (atTop) list.scrollTop = 0;
   WS.spots = r.spots;
@@ -2347,7 +2562,7 @@ function wsprWfOverlay() {
   $('wsprfcb').addEventListener('click', () => {
     WFC.on = !WFC.on; store.set('wsprfc', WFC.on); $('wsprfcb').classList.toggle('active', WFC.on); wfcShow();
   });
-  $('wsprclear').addEventListener('click', () => { $('wsprlist').textContent = ''; WS.spots = []; wsprWfOverlay(); });
+  $('wsprclear').addEventListener('click', () => { $('wsprlist').textContent = ''; listHead($('wsprlist')); WS.spots = []; wsprWfOverlay(); });
   $('wsprdial').addEventListener('click', () => {
     const b = (S.status && S.status.band) || 2;
     tune(WSPR_DIAL[b] || WSPR_DIAL[2]); setMode('usb');
@@ -2644,6 +2859,7 @@ const filterDefault = m => m === 'cw' ? 3 : m === 'am' ? 5 : 0;
 function filterOptions() { $('filter').querySelector('[value="5"]').hidden = S.mode !== 'am'; }   // 10 kHz: AM only
 function setMode(m) {
   S.mode = m; cmd(`mode ${m}`); store.set('mode', m);
+  { const n = bandFor(S.wanted); if (n) store.set('bandmode-' + n, m); }
   filterOptions();
   cwLayout();
   if (m !== 'iq') setFilter(store.get(filterKey(m), filterDefault(m)), false);
@@ -2716,8 +2932,9 @@ $('freq').addEventListener('focus', () => $('freq').select());
 // band of a frequency like radio_band_for() in src/control/radio.c (band numbers 1 = 10 m .. 3 = 40 m, 0 = none)
 const bandFor = f => 1 + [[28e6, 29.7e6], [14e6, 14.35e6], [7e6, 7.2e6]].findIndex(([a, b]) => f >= a - 2e5 && f <= b + 2e5);
 document.querySelectorAll('[data-f]').forEach(b => b.addEventListener('click', () => {
-  const n = Number(b.dataset.band), f = store.get('band-' + n, Number(b.dataset.f));
+  const n = Number(b.dataset.band), f = store.get('band-' + n, Number(b.dataset.f)), m = store.get('bandmode-' + n, null);
   tune(bandFor(f) === n ? f : Number(b.dataset.f));   // ignore a stored value from another band
+  if (m && m !== S.mode) setMode(m);
 }));
 document.querySelectorAll('[data-mode]').forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
 $('filter').addEventListener('change', () => setFilter($('filter').value));
@@ -2759,6 +2976,7 @@ $('txpwr').addEventListener('input', () => {
 });
 function afterConnect() {
   if (link) {
+    S.autoRx = link.kind === 'usb';        // the first STATUS decides whether RX_EN / the chain must be started
     cmd('station', true);                // station data from the board's flash (fills call, grid, power, TX Hz)
     const xr = store.get('xtalref', null);   // this device's SOF reference: RX / TX follow the crystal live
     if (xr !== null) cmd(`xtal ref ${xr >= 0 ? '+' : ''}${Number(xr).toFixed(3)}`, true);
@@ -2770,14 +2988,14 @@ function afterConnect() {
     if (TXA.node) cmd('stream txaudio on', true);
   }
 }
-$('connect').addEventListener('click', async () => { await connectUsb(); afterConnect(); });
+$('connect').addEventListener('click', async () => { if (link) { await disconnect(); return; } await connectUsb(); afterConnect(); });
 $('connect2').addEventListener('click', () => $('connect').click());
 $('demo2').addEventListener('click', () => $('demo').click());
 $('logclear').addEventListener('click', () => { $('log').textContent = ''; });
 // autoconnect: a board this browser was allowed to use before opens without the chooser
 $('autoconn').checked = store.get('autoconn', true);
 $('autoconn').addEventListener('change', () => store.set('autoconn', $('autoconn').checked));
-linkUi();
+linkUi(); listHead($('ft8list')); listHead($('wsprlist'));
 if (navigator.usb && $('autoconn').checked && !/[?&]demo/.test(location.search))
   navigator.usb.getDevices().then(async ds => {
     const d = ds.find(x => x.vendorId === VID && x.productId === PID);
@@ -2786,7 +3004,7 @@ if (navigator.usb && $('autoconn').checked && !/[?&]demo/.test(location.search))
 ft8SetMode(store.get('ft8mode', 'FT8') === 'FT4' ? 'FT4' : 'FT8');
 if (store.get('ft8', false)) ft8Set(true);
 $('demo').addEventListener('click', startDemo);
-$('help').addEventListener('click', () => { $('helptext').hidden = !$('helptext').hidden; });
+$('help').addEventListener('click', () => { $('helptext').hidden = !$('helptext').hidden; document.body.classList.toggle('showhelp', !$('helptext').hidden); });
 $('theme').addEventListener('click', () => {
   const r = document.documentElement, dark = matchMedia('(prefers-color-scheme: dark)').matches;
   const cur = r.dataset.theme || (dark ? 'dark' : 'light');
