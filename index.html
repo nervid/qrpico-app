@@ -59,7 +59,14 @@ aside { display: flex; flex-direction: column; gap: 12px; min-height: 0; overflo
 table.kv { width: 100%; border-collapse: collapse; font: 12px var(--mono); }
 table.kv td { padding: 2px 0; vertical-align: top; }
 table.kv td:last-child { text-align: right; }
-#log { font: 12px var(--mono); white-space: pre-wrap; overflow: auto; height: 180px; margin: 0 0 6px; color: var(--muted); }
+#log { font: 12px var(--mono); white-space: pre-wrap; overflow: auto; flex: 1; min-height: 260px; margin: 0; padding: 8px 10px; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+#v-con { min-height: 60vh; }
+.offline-banner { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px 12px; border: 1px solid var(--warn); border-radius: 8px; color: var(--warn); font-size: 14px; }
+.offline-banner[hidden] { display: none; }
+body.offline .needlink { opacity: 0.45; pointer-events: none; }
+body.offline .linkchip { display: none; }
+.chip[hidden] { display: none; }
+.tabs button .dot { display: inline-block; width: 7px; height: 7px; margin-left: 5px; border-radius: 50%; background: var(--warn); vertical-align: middle; }
 .row { display: flex; gap: 6px; }
 .row input { flex: 1; min-width: 0; font: 12px var(--mono); }
 label.inline { display: flex; gap: 6px; align-items: center; color: var(--muted); font-size: 13px; }
@@ -72,6 +79,9 @@ label.inline { display: flex; gap: 6px; align-items: center; color: var(--muted)
 .stepbtn { min-width: 2.4em; font-weight: 700; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 .mbar { display: none; }
 .tabs { align-self: flex-start; }
+@media (max-width: 620px) { .tabs.seg { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; align-self: stretch; }
+  .tabs.seg button, .tabs.seg button:first-child, .tabs.seg button:last-child { border-radius: 6px; margin-left: 0; padding-left: 4px; padding-right: 4px; } }
+#v-set .panel { max-width: 640px; }
 .tabs button[aria-selected="true"] { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
 .tabview { display: flex; flex-direction: column; gap: 8px; min-height: 0; flex: 1; }
 .tabview[hidden] { display: none; }
@@ -179,17 +189,20 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
   <button id="connect" class="primary">Connect</button>
   <button id="demo">Demo</button>
   <span id="st-conn" class="chip">not connected</span>
-  <span id="st-tx" class="chip">RX</span>
-  <span id="st-audio" class="chip">USB audio –</span>
-  <span id="st-lo" class="chip">LO –</span>
-  <span id="st-load" class="chip">core 1 –</span>
+  <span id="st-tx" class="chip linkchip" title="Transmit state (and the reason of the last TX end)">RX</span>
+  <span id="st-lo" class="chip linkchip" title="LO setting and NCO offset of the tuned frequency">LO –</span>
+  <span id="st-pa" class="chip linkchip" title="PA temperature (PA_TEMP)">PA –</span>
+  <span id="st-xtal" class="chip linkchip" title="Crystal correction">xtal –</span>
+  <span id="st-audio" class="chip linkchip" hidden>audio</span>
+  <span id="st-load" class="chip linkchip" hidden>core 1 –</span>
   <span class="spacer"></span>
   <button id="help" title="Keyboard and mouse">?</button>
   <button id="theme" title="Toggle light / dark">Theme</button>
 </header>
 <main>
   <section class="view">
-    <div class="controls">
+    <div class="offline-banner" id="offline" role="status"><span style="flex:1">No board connected: plug in the qrpico and press Connect (or try the Demo).</span><button id="connect2" class="primary">Connect</button><button id="demo2">Demo</button></div>
+    <div class="controls needlink">
       <div class="group">
         <button id="fdown" class="stepbtn" aria-label="One step down" title="One step down (hold: repeat)">−</button>
         <input id="freq" class="freq" inputmode="decimal" value="14.074000" aria-label="Frequency" title="MHz (14.074), kHz (14074) or Hz; Enter tunes">
@@ -237,6 +250,8 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
       <button role="tab" data-tab="wspr" aria-selected="false">WSPR</button>
       <button role="tab" data-tab="cw" aria-selected="false">CW</button>
       <button role="tab" data-tab="vna" aria-selected="false">VNA</button>
+      <button role="tab" data-tab="con" aria-selected="false">Console</button>
+      <button role="tab" data-tab="set" aria-selected="false">Settings</button>
     </div>
     <div id="v-spec" class="tabview">
     <div class="canvases">
@@ -275,7 +290,7 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
         <span>his call</span><input id="cwhis" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="e.g. OE1XYZ" aria-label="Call of the other station">
         <span>speed</span><select id="cwwpm" aria-label="CW speed"><option>12</option><option>15</option><option>18</option><option selected>20</option><option>22</option><option>25</option><option>28</option><option>30</option></select>
       </div>
-      <p class="note" id="cwst">Sends Morse on the shown frequency (CW mode: you hear stations at 600 Hz when they are on it). The board keys itself and stops 0.6 s after the text; text typed while it sends is appended. Your call: FT8 tab / station data.</p>
+      <p class="note" id="cwst">Sends Morse on the shown frequency (CW mode: you hear stations at 600 Hz when they are on it). The board keys itself and stops 0.6 s after the text; text typed while it sends is appended. Your call: Settings tab.</p>
     </div>
     <div id="v-vna" class="tabview" hidden>
       <div class="vnaplots">
@@ -316,7 +331,7 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
         <span>TX share</span><select id="wsprpct" aria-label="Share of periods with TX"><option value="10">10 %</option><option value="20" selected>20 %</option><option value="33">33 %</option><option value="50">50 %</option></select>
       </div>
       <div class="row"><button id="wspren" title="Master switch: transmissions only while this is on">Enable TX</button><button id="wsprhalt">Halt</button></div>
-      <p class="note" id="wsprtxmsg">Sends your call, the first 4 grid characters and the power from the TX power slider (call and grid: FT8 tab / station data).</p>
+      <p class="note" id="wsprtxmsg">Sends your call, the first 4 grid characters and the power from the TX power slider (call and grid: Settings tab).</p>
       <div class="ft8list" id="wsprlist" role="log" aria-label="WSPR spots"></div>
     </div>
     <div id="v-ft8" class="tabview" hidden>
@@ -330,20 +345,42 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
       <div class="freqwarn" id="ft8fw" role="status" hidden><span></span><button type="button">Tune</button></div>
       <p class="note" id="ft8st">Decodes every slot (FT8 15 s, FT4 7.5 s) from the board's receive audio (USB, e.g. 14.074 MHz). Needs the PC / phone clock within about ±1 s (NTP).</p>
       <div class="field" style="margin-top:6px">
-        <span>my call</span><input id="ft8call" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="e.g. OE3XYZ" aria-label="My call sign">
-        <span>my grid</span><input id="ft8grid" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="e.g. JN88ee" maxlength="6" aria-label="My locator, 4 or 6 characters">
         <span>TX audio</span><div class="row"><input id="ft8txf" type="number" min="200" max="2900" step="1" value="1500" aria-label="TX audio frequency in Hz" style="width:7em"><span class="unit">Hz</span></div>
-        <span title="Error of the board's 25 MHz crystal (+ = fast), e.g. from the median of your PSKReporter spots: (reported - sent) / sent">crystal</span><div class="row"><input id="xtal" type="number" min="-200" max="200" step="0.01" value="0" aria-label="Crystal error in ppm" style="width:7em"><span class="unit">ppm</span><button id="xtalmeas" title="Measure the crystal against this computer's clock (NTP-synchronised), about a minute, no TX">Measure</button></div>
-        <span></span><p class="note" id="xtalmsg" style="margin:0" hidden></p>
       </div>
       <div class="row" style="margin-top:6px"><button id="ft8en" title="Master switch: transmissions only while this is on">Enable TX</button><button id="ft8cq">CQ</button><button id="ft8halt">Halt</button></div>
       <p class="note" id="ft8txmsg">Tap / click a decode to answer that station; the QSO then runs by itself (report, RR73, 73).</p>
       <div class="row" style="margin-top:6px"><button id="ft8adif" title="Download the QSO log of this browser as an ADIF file (for QRZ, LoTW, Log4OM, ...)">Export ADIF</button><span class="note" id="ft8logn" style="margin:0"></span></div>
       <div class="ft8list" id="ft8list" role="log" aria-label="FT8 decodes"></div>
     </div>
+    <div id="v-con" class="tabview" hidden>
+      <pre id="log" role="log" aria-label="Console output"></pre>
+      <div class="row needlink"><input id="cmd" placeholder="command, e.g. rx stats or help (↑ history)" aria-label="Console command"><button id="send">Send</button><button id="logclear" type="button">Clear</button></div>
+    </div>
+    <div id="v-set" class="tabview" hidden>
+      <div class="panel">
+        <h2>Station (stored on the board)</h2>
+        <div class="field">
+        <span>my call</span><input id="ft8call" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="e.g. OE3XYZ" aria-label="My call sign">
+        <span>my grid</span><input id="ft8grid" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="e.g. JN88ee" maxlength="6" aria-label="My locator, 4 or 6 characters">
+        </div>
+        <p class="note">Used by FT8 / FT4, WSPR and the CW macros. Saved in the board's flash when you leave the field.</p>
+      </div>
+      <div class="panel">
+        <h2>Frequency and time</h2>
+        <div class="field">
+        <span title="Error of the board's 25 MHz crystal (+ = fast), e.g. from the median of your PSKReporter spots: (reported - sent) / sent">crystal</span><div class="row"><input id="xtal" type="number" min="-200" max="200" step="0.01" value="0" aria-label="Crystal error in ppm" style="width:7em"><span class="unit">ppm</span><button id="xtalmeas" title="Measure the crystal against this computer's clock (NTP-synchronised), about a minute, no TX">Measure</button></div>
+        <span></span><p class="note" id="xtalmsg" style="margin:0" hidden></p>
+        </div>
+        <p class="note">Measure needs this computer's clock NTP-synchronised (no TX, about a minute). FT8 / WSPR also need the clock within about ±1 s.</p>
+      </div>
+      <div class="panel">
+        <h2>App</h2>
+        <label class="inline"><input id="autoconn" type="checkbox" checked> connect automatically when the page opens (a board this browser was allowed to use before)</label>
+      </div>
+    </div>
   </section>
   <aside>
-    <div class="panel">
+    <div class="panel needlink">
       <h2>RX audio</h2>
       <div class="field">
         <span>from board</span><select id="ain" aria-label="Board audio input"><option value="">WebUSB stream</option></select>
@@ -353,7 +390,7 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
       <div class="row" style="margin-top:6px"><span class="note" style="margin:0">level</span><div class="meter"><div id="alevel"></div></div></div>
       <p class="note" id="anote">Plays the board's receive audio (USB / LSB) from the WebUSB stream, or from its USB audio input if one is chosen. Muted while transmitting.</p>
     </div>
-    <div class="panel">
+    <div class="panel needlink">
       <h2>TX</h2>
       <div class="field">
         <span>power</span><div class="row"><input id="txpwr" type="range" min="0.05" max="0.94" step="0.01" value="0.30" aria-label="TX PEP level"><span id="txpwrv" class="pwr"></span></div>
@@ -372,28 +409,23 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
       <summary>Status</summary>
       <table class="kv" id="status"><tbody></tbody></table>
     </details>
-    <details class="panel" id="p-test">
+    <details class="panel needlink" id="p-test">
       <summary>Test source</summary>
       <div class="row"><input id="t1" value="+1000 -40" aria-label="Tone 1: offset from tuned frequency in Hz, level dBFS"><input id="t2" value="+12000 -70" aria-label="Tone 2"></div>
       <div class="row" style="margin-top:6px"><button id="tset">Set tones</button><span class="note">offset from the tuned frequency (Hz) and dBFS</span></div>
     </details>
-    <details class="panel" id="p-console" open>
-      <summary>Console</summary>
-      <pre id="log"></pre>
-      <div class="row"><input id="cmd" placeholder="command, e.g. rx stats (↑ history)" aria-label="Console command"><button id="send">Send</button></div>
-    </details>
   </aside>
 </main>
 <!-- touch screens: Listen, Mute and a tap-to-toggle PTT always in reach -->
-<div id="mbar" class="mbar" role="toolbar" aria-label="Quick controls">
+<div id="mbar" class="mbar needlink" role="toolbar" aria-label="Quick controls">
   <button id="mlisten">Listen</button>
   <button id="mmute">Mute</button>
   <button id="mptt" class="ptt" aria-pressed="false">PTT</button>
 </div>
-<script src="ft8.js?v=1bf13ee"></script>
-<script src="ft4.js?v=1bf13ee"></script>
-<script src="wspr.js?v=1bf13ee"></script>
-<script src="cw.js?v=1bf13ee"></script>
+<script src="ft8.js?v=d86532b"></script>
+<script src="ft4.js?v=d86532b"></script>
+<script src="wspr.js?v=d86532b"></script>
+<script src="cw.js?v=d86532b"></script>
 <script>
 'use strict';
 // ---------------------------------------------------------------- protocol (docs/usb-protocol.md)
@@ -523,20 +555,20 @@ async function connectUsb(given) {
       close: async () => { open = false; try { await dev.close(); } catch (e) {} },
     };
     const prof = dev.configuration.interfaces.some(i => i.alternates.some(a => a.interfaceClass === 0x01)) ? 'headset' : 'app';
-    setConn(`connected ${dev.productName || 'qrpico'} ${dev.serialNumber || ''} (USB profile ${prof})`, 'ok');
+    setConn(`${dev.productName || 'qrpico'} connected`, 'ok', `${dev.productName || 'qrpico'} ${dev.serialNumber || ''}, USB profile ${prof}`);
     (async () => {
       while (open) {
         try {
           const r = await dev.transferIn(epIn, 4096);
           if (r.data && r.data.byteLength) parser.push(new Uint8Array(r.data.buffer, r.data.byteOffset, r.data.byteLength));
-        } catch (e) { if (open) { log('USB: ' + e.message); setConn('disconnected', 'warn'); } open = false; }
+        } catch (e) { if (open) { log('USB: ' + e.message); if (link && link.kind === 'usb') link = null; setConn('disconnected', 'warn'); } open = false; }
       }
     })();
     await cmd('stream on');
     await cmd('rx stats');
   } catch (e) { log('connect: ' + e.message); }
 }
-navigator.usb && navigator.usb.addEventListener('disconnect', () => { setConn('disconnected', 'warn'); if (link && link.kind === 'usb') link = null; });
+navigator.usb && navigator.usb.addEventListener('disconnect', () => { if (link && link.kind === 'usb') { link = null; setConn('disconnected', 'warn'); } });
 // the board comes back (replug, `usb profile` re-enumeration): reconnect without the chooser if it was ours
 navigator.usb && navigator.usb.addEventListener('connect', async e => {
   if (link || e.device.vendorId !== VID || e.device.productId !== PID) return;
@@ -749,8 +781,17 @@ const store = {
   set(k, v) { try { localStorage.setItem('qrpico-' + k, JSON.stringify(v)); } catch (e) {} },
 };
 
-function log(t) { const l = $('log'); l.textContent += t.endsWith('\n') ? t : t + '\n'; if (l.textContent.length > 20000) l.textContent = l.textContent.slice(-15000); l.scrollTop = l.scrollHeight; }
-function setConn(t, cls) { const c = $('st-conn'); c.textContent = t; c.className = 'chip ' + (cls || ''); }
+function log(t) {
+  const l = $('log'); l.textContent += t.endsWith('\n') ? t : t + '\n'; if (l.textContent.length > 20000) l.textContent = l.textContent.slice(-15000); l.scrollTop = l.scrollHeight;
+  const b = document.querySelector('[data-tab="con"]');     // unread output: a dot on the Console tab
+  if (b && link && V.tab !== 'con' && !b.querySelector('.dot')) b.insertAdjacentHTML('beforeend', '<span class="dot" aria-label="new output"></span>');
+}
+function setConn(t, cls, title = '') { const c = $('st-conn'); c.textContent = t; c.title = title; c.className = 'chip ' + (cls || ''); linkUi(); }
+// without a board the controls that need one are greyed out and a banner offers Connect / Demo
+function linkUi() {
+  document.body.classList.toggle('offline', !link);
+  $('offline').hidden = !!link;
+}
 async function cmd(line, quiet = false) { if (!link) { if (!quiet) log('not connected'); return; } if (!quiet) log('> ' + line); await link.send(T_CMD, enc.encode(line)); }
 
 function onFrame(type, flags, p) {
@@ -776,16 +817,27 @@ function onFrame(type, flags, p) {
 }
 
 const fmtHz = f => (f / 1e6).toFixed(6);
+// crystal chip: the stored error and whether this computer has a reference (then RX / TX follow the crystal live)
+function xtalChip() {
+  const c = $('st-xtal'), ppm = Number($('xtal').value) || 0, ref = store.get('xtalref', null) !== null;
+  c.textContent = `xtal ${ppm >= 0 ? '+' : ''}${ppm.toFixed(1)} ppm${ref ? ' ✓' : ''}`;
+  c.title = ref ? 'Crystal error, tracked live against this computer\'s USB clock (calibrated here)'
+                : 'Crystal error as stored on the board; not calibrated on this computer (Settings: Measure)';
+  c.className = 'chip linkchip' + (ref ? ' ok' : '');
+}
 function updateStatus() {
   const s = S.status;
   S.wanted = s.wanted;
   digiWarn();
   if (V.tab === 'cw') cwShow();
   if (document.activeElement !== $('freq')) $('freq').value = fmtHz(s.wanted);
-  $('st-lo').textContent = `LO ${fmtHz(s.fLo)} MHz, offset ${(s.offset / 1000).toFixed(3)} kHz`;
-  const load = s.blkAvg / 2731 * 100;
-  const ld = $('st-load'); ld.textContent = `core 1 ${load.toFixed(0)} %`; ld.className = 'chip ' + (load > 80 ? 'warn' : 'ok');
-  const au = $('st-audio'); au.textContent = s.audio ? 'USB audio streaming' : 'USB audio idle'; au.className = 'chip ' + (s.audio ? 'ok' : '');
+  $('st-lo').textContent = s.running ? `LO ${(s.fLo / 1e6).toFixed(4)} ${s.offset >= 0 ? '+' : '−'}${Math.abs(s.offset / 1000).toFixed(1)} kHz` : 'RX stopped';
+  $('st-lo').className = 'chip linkchip' + (s.running ? '' : ' warn');
+  const pa = $('st-pa'); pa.textContent = `PA ${s.paC.toFixed(0)} °C`; pa.className = 'chip linkchip' + (s.paC > 70 ? ' warn' : '');
+  const load = s.blkAvg / 2731 * 100;           // shown only when core 1 is close to its limit
+  const ld = $('st-load'); ld.textContent = `core 1 ${load.toFixed(0)} %`; ld.hidden = load <= 80; ld.className = 'chip linkchip warn';
+  const au = $('st-audio'); au.textContent = 'USB audio ▶'; au.hidden = !s.audio; au.className = 'chip linkchip ok';
+  xtalChip();
   const rows = [
     ['tuned', fmtHz(s.wanted) + ' MHz'], ['LO', fmtHz(s.fLo) + ' MHz'], ['NCO offset', (s.offset >= 0 ? '+' : '') + s.offset.toFixed(1) + ' Hz'],
     ['mode', modeNames[s.mode] || '?'], ['source', s.source ? 'test' : 'PCM1808'], ['chain', s.running ? 'running' : 'stopped'],
@@ -1264,7 +1316,7 @@ function ft8Tick() {
   }
   if (have < m.need) { $('ft8st').textContent = `slot ${hms(slot)}: only ${(have / 12000).toFixed(1)} s of audio, not decoded`; return; }
   if (!F.worker) {
-    F.worker = new Worker('ft8worker.js?v=1bf13ee');
+    F.worker = new Worker('ft8worker.js?v=d86532b');
     F.worker.onmessage = e => ft8Result(e.data);
     F.worker.onerror = e => { F.busy = false; log('FT8 worker: ' + e.message); };
   }
@@ -1344,7 +1396,7 @@ function ft8Settings() {
 // station data live in the board's flash (console 'station'): read on connect, written on change
 function stationApply(call, grid, power, ft8hz, xtal, xtalTemp) {
   S.station = { call, grid, power, ft8hz, xtal, xtalTemp };
-  if (xtal !== undefined) $('xtal').value = Number(xtal).toFixed(2);
+  if (xtal !== undefined) { $('xtal').value = Number(xtal).toFixed(2); xtalChip(); }
   $('xtal').title = xtalTemp !== undefined ? `stored: ${Number(xtal).toFixed(2)} ppm, set at ${xtalTemp} C (RP2354 die temperature)` : '';
   if (call !== '-') $('ft8call').value = call;
   if (grid !== '-') $('ft8grid').value = grid;
@@ -1681,7 +1733,7 @@ function cwLogLine(cls, text) {
 }
 function cwSend(text) {
   const my = $('ft8call').value.trim().toUpperCase(), his = $('cwhis').value.trim().toUpperCase();
-  if (/\{MY\}/.test(text) && !my) { log('CW: enter your call (FT8 tab / station data)'); return; }
+  if (/\{MY\}/.test(text) && !my) { log('CW: enter your call (Settings tab)'); return; }
   if (/\{HIS\}/.test(text) && !his) { log('CW: enter his call'); $('cwhis').focus(); return; }
   const t = cwClean(text.replace(/\{MY\}/g, my).replace(/\{HIS\}/g, his));
   if (!t) return;
@@ -1736,7 +1788,8 @@ function setTab(tab) {
   V.tab = tab; store.set('tab', tab);
   document.querySelectorAll('[data-tab]').forEach(b => b.setAttribute('aria-selected', String(b.dataset.tab === tab)));
   $('v-spec').hidden = tab !== 'spec'; $('v-ft8').hidden = tab !== 'ft8'; $('v-wspr').hidden = tab !== 'wspr'; $('v-cw').hidden = tab !== 'cw';
-  $('v-vna').hidden = tab !== 'vna';
+  $('v-vna').hidden = tab !== 'vna'; $('v-con').hidden = tab !== 'con'; $('v-set').hidden = tab !== 'set';
+  if (tab === 'con') { const d = document.querySelector('[data-tab="con"] .dot'); if (d) d.remove(); $('log').scrollTop = $('log').scrollHeight; }
   cwLayout();
   audioStream();
   if (tab === 'spec') { S.fLoWf = null; drawSpectrum(); drawWfOverlay(); } else if (tab === 'ft8') ft8WfOverlay(); else if (tab === 'wspr') wsprWfOverlay(); else if (tab === 'vna') { vnaDraw(); vnaPoll(true); } else { CWS.lastF = null; cwScopeOverlay(); }
@@ -2101,7 +2154,7 @@ function wsprTick() {
       if (have < 100 * 12000) $('wsprst').textContent = `period ${hm(period)}: only ${(have / 12000).toFixed(0)} s of audio, not decoded`;
       else {
         if (!WS.worker) {
-          WS.worker = new Worker('wsprworker.js?v=1bf13ee');
+          WS.worker = new Worker('wsprworker.js?v=d86532b');
           WS.worker.onmessage = e => wsprResult(e.data);
           WS.worker.onerror = e => { WS.busy = false; log('WSPR worker: ' + e.message); };
         }
@@ -2161,7 +2214,7 @@ function wfcShow() {
   const senders = new Set(p.map(x => x.call)).size;
   el.textContent = `Frequency check: our receive frequency ${med >= 0 ? '+' : ''}${med.toFixed(2)} ppm ± ${se.toFixed(2)} against the other receivers ` +
     `(${p.length} spots, ${senders} transmitters, last 3 h${waiting})` +
-    (Math.abs(med) > 1 && Math.abs(med) > 2 * se ? ' - more than 1 ppm off: measure the crystal (FT8 tab, Measure).' : '.');
+    (Math.abs(med) > 1 && Math.abs(med) > 2 * se ? ' - more than 1 ppm off: measure the crystal (Settings tab, Measure).' : '.');
 }
 function wsprResult(r) {
   WS.busy = false;
@@ -2300,7 +2353,7 @@ function wsprWfOverlay() {
     tune(WSPR_DIAL[b] || WSPR_DIAL[2]); setMode('usb');
   });
   $('wspren').addEventListener('click', () => {
-    if (!WS.en && !FT8.stdCall6($('ft8call').value.trim().toUpperCase())) { log('WSPR: enter your call sign (FT8 tab / station data)'); return; }
+    if (!WS.en && !FT8.stdCall6($('ft8call').value.trim().toUpperCase())) { log('WSPR: enter your call sign (Settings tab)'); return; }
     WS.en = !WS.en; if (!WS.en && WS.txing) { cmd('ptt off'); wsprTxEnd(); } wsprShow();
   });
   $('wsprhalt').addEventListener('click', () => { WS.en = false; if (WS.txing) { cmd('ptt off'); wsprTxEnd(); } wsprShow(); });
@@ -2718,6 +2771,18 @@ function afterConnect() {
   }
 }
 $('connect').addEventListener('click', async () => { await connectUsb(); afterConnect(); });
+$('connect2').addEventListener('click', () => $('connect').click());
+$('demo2').addEventListener('click', () => $('demo').click());
+$('logclear').addEventListener('click', () => { $('log').textContent = ''; });
+// autoconnect: a board this browser was allowed to use before opens without the chooser
+$('autoconn').checked = store.get('autoconn', true);
+$('autoconn').addEventListener('change', () => store.set('autoconn', $('autoconn').checked));
+linkUi();
+if (navigator.usb && $('autoconn').checked && !/[?&]demo/.test(location.search))
+  navigator.usb.getDevices().then(async ds => {
+    const d = ds.find(x => x.vendorId === VID && x.productId === PID);
+    if (d && !link) { log('board found: connecting'); await connectUsb(d); afterConnect(); }
+  });
 ft8SetMode(store.get('ft8mode', 'FT8') === 'FT4' ? 'FT4' : 'FT8');
 if (store.get('ft8', false)) ft8Set(true);
 $('demo').addEventListener('click', startDemo);
@@ -2755,7 +2820,7 @@ const persist = (id, prop = 'value') => {
 };
 ['dbmin', 'dbmax', 'wfmin', 'wfmax', 'wfspeed', 'wftick', 'avol', 'mgain'].forEach(id => persist(id));
 ['wfauto', 'hidelo', 'mcomp', 'latch'].forEach(id => persist(id, 'checked'));
-['p-status', 'p-test', 'p-console'].forEach(id => persist(id, 'open'));
+['p-status', 'p-test'].forEach(id => persist(id, 'open'));
 $('step').value = store.get('step', '100');
 $('txpwr').value = store.get('txpwr', '0.30'); showPwr();
 S.mode = store.get('mode', 'usb');
