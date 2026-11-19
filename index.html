@@ -144,6 +144,7 @@ label.inline { display: flex; gap: 6px; align-items: center; color: var(--muted)
 .vnafield { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px 8px; font-size: 13px; }
 .vnafield label { display: flex; flex-direction: column; gap: 2px; color: var(--muted); font-size: 12px; }
 .vnafield input, .vnafield select { width: 100%; min-width: 0; font: 13px var(--mono); }
+#v-vna[data-vv="ant"] .compOnly, #v-vna[data-vv="comp"] .antOnly { display: none; }
 .vnacal { border: 1px solid var(--accent); border-radius: 8px; padding: 8px 10px; }
 .vnacal ol { margin: 4px 0; padding-left: 1.4em; font-size: 13px; }
 .vnacal li.done { color: var(--ok); } .vnacal li.cur { font-weight: 600; }
@@ -307,15 +308,19 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
       <div class="row" style="flex-wrap:wrap"><div class="seg" role="group" aria-label="VNA view"><button data-vv="ant" title="SWR, R and X of an antenna or line">Antenna</button><button data-vv="comp" title="L or C with series / parallel R, Q and self-resonance of a part on the fixture">Component</button></div>
         <select id="vnamodel" aria-label="Equivalent circuit" title="Equivalent circuit of the part" style="width:auto"><option value="s">series R + L / C</option><option value="p">parallel R ‖ L / C</option></select></div>
       <details class="panel" id="vnafix">
-        <summary>Fixture compensation (component view)</summary>
+        <summary>Coax and fixture</summary>
         <div class="vnafield" style="grid-template-columns: repeat(2, minmax(0, 1fr))">
           <label>coax length m<input id="vnalen" type="number" min="0" step="0.01" placeholder="e.g. 0.34" title="Length of the coax between J701 and the clips; sets the delay below"></label>
           <label>velocity factor<input id="vnavf" type="number" min="0.3" max="1" step="0.01" value="0.66" title="0.66 solid PE (RG58, RG174, RG316 0.70), 0.78-0.85 foam PE"></label>
           <label>cable delay ps (one way)<input id="vnatau" type="number" step="1" value="0" title="Port extension: delay of the line between J701 and the clips; about 5 ps per mm of PE coax (VF 0.66)"></label>
-          <label>&nbsp;<button id="vnataub" type="button" title="Delay from the stored open sweep (phase slope of an ideal open)">delay from open</button></label>
+          <label class="compOnly">&nbsp;<button id="vnataub" type="button" title="Delay from the stored open sweep (phase slope of an ideal open)">delay from open</button></label>
         </div>
-        <div class="row" style="margin-top:6px;flex-wrap:wrap"><button id="vnafo" type="button" title="Clips open: sweep the present range and store it">Measure open</button><button id="vnafs" type="button" title="Clips shorted: sweep the present range and store it">Measure short</button><button id="vnafx" type="button">Clear</button></div>
-        <p class="note" id="vnafst"></p>
+        <div class="antOnly" style="margin-top:6px">
+          <label class="inline"><input id="vnaant" type="checkbox"> show the values at the antenna end of the coax (length and velocity factor above)</label>
+          <div class="vnafield" style="grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top:4px"><label>coax loss dB / 100 m at 10 MHz<input id="vnaloss" type="number" min="0" max="50" step="0.1" value="0" title="RG58 about 4.6, RG174 about 10, RG316 about 9, RG213 about 2.2 (scaled with the square root of the frequency)"></label></div>
+        </div>
+        <div class="row compOnly" style="margin-top:6px;flex-wrap:wrap"><button id="vnafo" type="button" title="Clips open: sweep the present range and store it">Measure open</button><button id="vnafs" type="button" title="Clips shorted: sweep the present range and store it">Measure short</button><button id="vnafx" type="button">Clear</button></div>
+        <p class="note compOnly" id="vnafst"></p>
         <p class="note help">Order: delay (port extension) for the line to the clips, then open / short at the clips (series impedance from the short, shunt admittance from the open, LCR-meter style). Measure open and short over the range you will use; outside it no compensation is applied.</p>
       </details>
       <div class="row" id="vnaquick"><button data-r="7.0,7.2,5">40 m</button><button data-r="14.0,14.35,10">20 m</button><button data-r="28.0,29.7,50">10 m</button><button data-r="1,30,250" title="Leaves the amateur bands: needs the tick below">1 – 30 MHz</button></div>
@@ -455,10 +460,10 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
   <button id="mmute">Mute</button>
   <button id="mptt" class="ptt" aria-pressed="false">PTT</button>
 </div>
-<script src="ft8.js?v=9a8961b"></script>
-<script src="ft4.js?v=9a8961b"></script>
-<script src="wspr.js?v=9a8961b"></script>
-<script src="cw.js?v=9a8961b"></script>
+<script src="ft8.js?v=f47538e"></script>
+<script src="ft4.js?v=f47538e"></script>
+<script src="wspr.js?v=f47538e"></script>
+<script src="cw.js?v=f47538e"></script>
 <script>
 'use strict';
 // ---------------------------------------------------------------- protocol (docs/usb-protocol.md)
@@ -1371,7 +1376,7 @@ function ft8Tick() {
   }
   if (have < m.need) { $('ft8st').textContent = `slot ${hms(slot)}: only ${(have / 12000).toFixed(1)} s of audio, not decoded`; return; }
   if (!F.worker) {
-    F.worker = new Worker('ft8worker.js?v=9a8961b');
+    F.worker = new Worker('ft8worker.js?v=f47538e');
     F.worker.onmessage = e => ft8Result(e.data);
     F.worker.onerror = e => { F.busy = false; log('FT8 worker: ' + e.message); };
   }
@@ -1874,7 +1879,18 @@ const VNA_TX = [[7e6, 7.2e6], [14e6, 14.35e6], [28e6, 29.7e6]];   // the board's
 const VNA_STD = ['load', 'open', 'short'];
 const vnaInBand = f => VNA_TX.some(([a, b]) => f >= a && f <= b);
 const vnaSwr = r => r < 0.99 ? (1 + r) / (1 - r) : 99;
+// antenna view, 'at the antenna end': Gamma_load = Gamma_in exp(2 (alpha + j beta) l), the coax loss
+// (dB / 100 m at 10 MHz) scaled with sqrt(f); the line delay is the one of the length / velocity factor
+function vnaAntEnd(p) {
+  if (VN.vview !== 'ant' || !VF.antEnd || !VF.tau) return p;   // the component view has its own chain (vnaComp)
+  const a = 4 * Math.PI * p.f * VF.tau * 1e-12, lossDb = (VF.loss || 0) * Math.sqrt(p.f / 10e6) * (VF.len || 0) / 100;
+  const k = 10 ** (2 * lossDb / 20);                 // there and back
+  let gre = k * (p.gre * Math.cos(a) - p.gim * Math.sin(a)), gim = k * (p.gre * Math.sin(a) + p.gim * Math.cos(a));
+  const m = Math.hypot(gre, gim); if (m > 0.999) { gre *= 0.999 / m; gim *= 0.999 / m; }
+  return { ...p, gre, gim, err: p.err * k };
+}
 function vnaPoint(p) {
+  p = vnaAntEnd(p);
   const r = Math.hypot(p.gre, p.gim), d = (1 - p.gre) ** 2 + p.gim ** 2;
   return { ...p, r, swr: vnaSwr(r), R: 50 * (1 - p.gre ** 2 - p.gim ** 2) / d, X: 50 * 2 * p.gim / d, ok: !(p.flags & 1) };
 }
@@ -2202,9 +2218,9 @@ $('vnago').addEventListener('click', vnaSweep);
 // view switch and fixture compensation
 VN.vview = store.get('vnaview', 'ant');
 function vnaView(v) {
-  VN.vview = v; store.set('vnaview', v);
+  VN.vview = v; store.set('vnaview', v); $('v-vna').dataset.vv = v;
   document.querySelectorAll('[data-vv]').forEach(b => b.classList.toggle('active', b.dataset.vv === v));
-  $('vnamodel').hidden = $('vnafix').hidden = v !== 'comp';
+  $('vnamodel').hidden = v !== 'comp';
   $('vnaswr').setAttribute('aria-label', v === 'comp' ? 'Inductance or capacitance over frequency' : 'SWR over frequency');
   vnaDraw();
 }
@@ -2214,7 +2230,10 @@ function vnaFixText() {
   $('vnatau').value = VF.tau;
   $('vnavf').value = VF.vf || 0.66;
   $('vnalen').value = VF.len != null ? VF.len : '';
+  $('vnaant').checked = !!VF.antEnd; $('vnaloss').value = VF.loss || 0;
 }
+$('vnaant').addEventListener('change', () => { VF.antEnd = $('vnaant').checked; store.set('vnafix', VF); vnaDraw(); });
+$('vnaloss').addEventListener('change', () => { VF.loss = Number($('vnaloss').value) || 0; store.set('vnafix', VF); vnaDraw(); });
 document.querySelectorAll('[data-vv]').forEach(b => b.addEventListener('click', () => vnaView(b.dataset.vv)));
 $('vnamodel').value = store.get('vnamodel', 's');
 $('vnamodel').addEventListener('change', () => { store.set('vnamodel', $('vnamodel').value); vnaDraw(); });
@@ -2381,7 +2400,7 @@ function wsprTick() {
       if (have < 100 * 12000) $('wsprst').textContent = `period ${hm(period)}: only ${(have / 12000).toFixed(0)} s of audio, not decoded`;
       else {
         if (!WS.worker) {
-          WS.worker = new Worker('wsprworker.js?v=9a8961b');
+          WS.worker = new Worker('wsprworker.js?v=f47538e');
           WS.worker.onmessage = e => wsprResult(e.data);
           WS.worker.onerror = e => { WS.busy = false; log('WSPR worker: ' + e.message); };
         }
