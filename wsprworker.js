@@ -1,6 +1,6 @@
 // WSPR decoding off the page's main thread: one 2-minute period (12 kS/s) per message, spots back.
 'use strict';
-importScripts('ft8.js?v=bb35715', 'wspr.js?v=bb35715');          // ft8.js provides the FFT
+importScripts('ft8.js?v=9a8961b', 'wspr.js?v=9a8961b');          // ft8.js provides the FFT
 onmessage = e => {
   const { period, audio } = e.data;
   const res = WSPR.decode(audio);

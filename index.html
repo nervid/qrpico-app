@@ -309,6 +309,8 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
       <details class="panel" id="vnafix">
         <summary>Fixture compensation (component view)</summary>
         <div class="vnafield" style="grid-template-columns: repeat(2, minmax(0, 1fr))">
+          <label>coax length m<input id="vnalen" type="number" min="0" step="0.01" placeholder="e.g. 0.34" title="Length of the coax between J701 and the clips; sets the delay below"></label>
+          <label>velocity factor<input id="vnavf" type="number" min="0.3" max="1" step="0.01" value="0.66" title="0.66 solid PE (RG58, RG174, RG316 0.70), 0.78-0.85 foam PE"></label>
           <label>cable delay ps (one way)<input id="vnatau" type="number" step="1" value="0" title="Port extension: delay of the line between J701 and the clips; about 5 ps per mm of PE coax (VF 0.66)"></label>
           <label>&nbsp;<button id="vnataub" type="button" title="Delay from the stored open sweep (phase slope of an ideal open)">delay from open</button></label>
         </div>
@@ -453,10 +455,10 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
   <button id="mmute">Mute</button>
   <button id="mptt" class="ptt" aria-pressed="false">PTT</button>
 </div>
-<script src="ft8.js?v=bb35715"></script>
-<script src="ft4.js?v=bb35715"></script>
-<script src="wspr.js?v=bb35715"></script>
-<script src="cw.js?v=bb35715"></script>
+<script src="ft8.js?v=9a8961b"></script>
+<script src="ft4.js?v=9a8961b"></script>
+<script src="wspr.js?v=9a8961b"></script>
+<script src="cw.js?v=9a8961b"></script>
 <script>
 'use strict';
 // ---------------------------------------------------------------- protocol (docs/usb-protocol.md)
@@ -1369,7 +1371,7 @@ function ft8Tick() {
   }
   if (have < m.need) { $('ft8st').textContent = `slot ${hms(slot)}: only ${(have / 12000).toFixed(1)} s of audio, not decoded`; return; }
   if (!F.worker) {
-    F.worker = new Worker('ft8worker.js?v=bb35715');
+    F.worker = new Worker('ft8worker.js?v=9a8961b');
     F.worker.onmessage = e => ft8Result(e.data);
     F.worker.onerror = e => { F.busy = false; log('FT8 worker: ' + e.message); };
   }
@@ -2210,11 +2212,22 @@ function vnaFixText() {
   const d = s => VF[s] ? `${s} ✓ (${(VF[s].f[0] / 1e6).toFixed(3)}–${(VF[s].f[VF[s].f.length - 1] / 1e6).toFixed(3)} MHz, ${VF[s].f.length} pts)` : `${s} –`;
   $('vnafst').textContent = `${d('open')}, ${d('short')}, delay ${VF.tau} ps`;
   $('vnatau').value = VF.tau;
+  $('vnavf').value = VF.vf || 0.66;
+  $('vnalen').value = VF.len != null ? VF.len : '';
 }
 document.querySelectorAll('[data-vv]').forEach(b => b.addEventListener('click', () => vnaView(b.dataset.vv)));
 $('vnamodel').value = store.get('vnamodel', 's');
 $('vnamodel').addEventListener('change', () => { store.set('vnamodel', $('vnamodel').value); vnaDraw(); });
-$('vnatau').addEventListener('change', () => { VF.tau = Number($('vnatau').value) || 0; store.set('vnafix', VF); vnaFixText(); vnaDraw(); });
+$('vnatau').addEventListener('change', () => { VF.tau = Number($('vnatau').value) || 0; VF.len = null; store.set('vnafix', VF); vnaFixText(); vnaDraw(); });
+// coax length and velocity factor -> one-way delay: tau = l / (VF c)
+function vnaLenTau() {
+  const l = Number($('vnalen').value), vf = Number($('vnavf').value) || 0.66;
+  VF.vf = vf;
+  if ($('vnalen').value !== '' && l >= 0) { VF.len = l; VF.tau = Math.round(l / (vf * 299792458) * 1e12); }
+  store.set('vnafix', VF); vnaFixText(); vnaDraw();
+}
+$('vnalen').addEventListener('change', vnaLenTau);
+$('vnavf').addEventListener('change', vnaLenTau);
 // delay from the open: an ideal open has Gamma = exp(-j 4 pi f tau); least squares of the unwrapped phase through the origin
 $('vnataub').addEventListener('click', () => {
   const d = VF.open; if (!d || d.f.length < 2) { toast('Measure the open first', true); return; }
@@ -2225,13 +2238,13 @@ $('vnataub').addEventListener('click', () => {
     while (ph - prev < -Math.PI) { ph += 2 * Math.PI; off += 2 * Math.PI; }
     prev = ph; sfp += f * ph; sff += f * f;
   });
-  VF.tau = Math.round(-sfp / sff / (4 * Math.PI) * 1e12);
+  VF.tau = Math.round(-sfp / sff / (4 * Math.PI) * 1e12); VF.len = null;
   store.set('vnafix', VF); vnaFixText(); vnaDraw(); toast(`Cable delay from the open: ${VF.tau} ps`);
 });
 const vnaFixSweep = std => { VN.fixNext = std; vnaSweep(); };
 $('vnafo').addEventListener('click', () => vnaFixSweep('open'));
 $('vnafs').addEventListener('click', () => vnaFixSweep('short'));
-$('vnafx').addEventListener('click', () => { VF.open = VF.short = null; VF.tau = 0; store.set('vnafix', VF); vnaFixText(); vnaDraw(); });
+$('vnafx').addEventListener('click', () => { VF.open = VF.short = null; VF.tau = 0; VF.len = null; store.set('vnafix', VF); vnaFixText(); vnaDraw(); });
 vnaFixText(); vnaView(VN.vview);
 $('vnastop').addEventListener('click', () => { cmd('vna abort'); if (VN.calStep >= 0) VN.calSeen = false; vnaPoll(true); });
 $('vnacsv').addEventListener('click', vnaCsv);
@@ -2368,7 +2381,7 @@ function wsprTick() {
       if (have < 100 * 12000) $('wsprst').textContent = `period ${hm(period)}: only ${(have / 12000).toFixed(0)} s of audio, not decoded`;
       else {
         if (!WS.worker) {
-          WS.worker = new Worker('wsprworker.js?v=bb35715');
+          WS.worker = new Worker('wsprworker.js?v=9a8961b');
           WS.worker.onmessage = e => wsprResult(e.data);
           WS.worker.onerror = e => { WS.busy = false; log('WSPR worker: ' + e.message); };
         }
